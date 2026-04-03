@@ -1,3 +1,4 @@
+import { ConfigurationError, ValidationError } from "./errors";
 import shortid from "shortid";
 import { getConfig } from "./config";
 import { extractEmailContent } from "./email";
@@ -343,8 +344,8 @@ export function replacePlaceholders(
   const dynamicEmailPlaceholders = ["{{run.dynamicEmail}}", "{{global.dynamicEmail}}"];
   for (const placeholder of dynamicEmailPlaceholders) {
     if (result.includes(placeholder) && !getConfig().email) {
-      throw new Error(
-        `Email provider not configured. Call configure({ email: ... }) before using ${placeholder}.`,
+      throw new ConfigurationError(
+      `Email provider not configured. Call configure({ email: ... }) before using ${placeholder}.`,
       );
     }
   }
@@ -397,9 +398,9 @@ export async function processPlaceholders(
     stepsContainGlobalPlaceholders(steps) || assertionsContainGlobalPlaceholders(assertions);
 
   if (hasGlobalPlaceholders && !executionId) {
-    throw new Error(
+    throw new ValidationError(
       "{{global.*}} placeholders require an executionId. " +
-        "Please provide executionId in runSteps options to use global placeholders.",
+      "Please provide executionId in runSteps options to use global placeholders.",
     );
   }
 
@@ -407,9 +408,9 @@ export async function processPlaceholders(
   const hasProjectDataPlaceholders = stepsContainProjectDataPlaceholders(steps);
 
   if (hasProjectDataPlaceholders && !projectId) {
-    throw new Error(
+    throw new ValidationError(
       "{{data.*}} placeholders require a projectId. " +
-        "Please provide projectId in runSteps options to use project data placeholders.",
+      "Please provide projectId in runSteps options to use project data placeholders.",
     );
   }
 
