@@ -1,6 +1,6 @@
 import { generateObject, generateText, ModelMessage } from "ai";
 import { z } from "zod";
-import { getModelId } from "./config";
+import { getModelId, getConfig } from "./config";
 import { ASSERTION_MODEL_TIMEOUT, THINKING_BUDGET_DEFAULT } from "./constants";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
@@ -71,12 +71,17 @@ export const assert = async ({
           },
         ];
 
+    const useCua = getConfig().ai?.cuaMode ?? false;
+
+    const includeSnapshot = !images && !useCua;
+
     const basePrompt = `
 You are an AI-powered QA Agent designed to test web applications.
             
 You have access to the following information. Based on this information, you'll tell us whether the assertion provided below should pass or not.
+$
 ${
-  !images
+  includeSnapshot
     ? `
 - An accessibility snapshot of the current page, which provides a detailed structure of the DOM
 - A screenshot of the current page`
@@ -84,13 +89,14 @@ ${
 }
 
 ${
-  !images
+  includeSnapshot
     ? `
 <Snapshot>
 ${snapshot}
 </Snapshot>
 `
     : ""
+}
 }
 
 <Assertion>
@@ -177,10 +183,31 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
       return object;
     };
 
+    // CUA assertion function (used when CUA mode is enabled). Uses the configured 'cua' model.
+    const getCUAAssertion = async (): Promise<AssertionResult> => {
+      const { object } = await generateObject({
+        model: resolveModel(getModelId("cua")),
+        temperature: 0,
+        providerOptions: thinkingEnabled
+          ? {
+              google: {
+                thinkingConfig: {
+                  thinkingBudget: THINKING_BUDGET_DEFAULT,
+                },
+              },
+            }
+          : undefined,
+        messages,
+        schema: assertionSchema,
+      });
+
+      return object;
+    };
+
     // Arbiter function using Gemini 2.5 Pro with thinking enabled
     const getArbiterDecision = async (
       claudeResult: AssertionResult,
-      geminiResult: AssertionResult,
+      secondaryResult: AssertionResult,
     ): Promise<AssertionResult> => {
       const arbiterPrompt = `
 You are an AI arbiter tasked with resolving a disagreement between two AI models about an assertion.
@@ -190,19 +217,21 @@ Claude's Assessment:
 - Confidence: ${claudeResult.confidenceScore}%
 - Reasoning: ${claudeResult.reasoning}
 
-Gemini's Assessment:
-- Assertion Passed: ${geminiResult.assertionPassed}
-- Confidence: ${geminiResult.confidenceScore}%
-- Reasoning: ${geminiResult.reasoning}
+Secondary Model's Assessment:
+- Assertion Passed: ${secondaryResult.assertionPassed}
+- Confidence: ${secondaryResult.confidenceScore}%
+- Reasoning: ${secondaryResult.reasoning}
 
+$
 ${
-  !images
+  includeSnapshot
     ? `
 <Snapshot>
 ${snapshot}
 </Snapshot>
 `
     : ""
+}
 }
 
 <Assertion>
@@ -258,16 +287,16 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
     const runAssertion = async (attempt = 0): Promise<AssertionResult> => {
       try {
         // Run both models in parallel for speed optimization
-        const [claudeResult, geminiResult] = await Promise.all([
+        const [claudeResult, secondaryResult] = await Promise.all([
           withTimeout(getClaudeAssertion(), ASSERTION_MODEL_TIMEOUT),
-          withTimeout(getGeminiAssertion(), ASSERTION_MODEL_TIMEOUT),
+          withTimeout(useCua ? getCUAAssertion() : getGeminiAssertion(), ASSERTION_MODEL_TIMEOUT),
         ]);
 
         // Check if models disagree on assertionPassed
-        if (claudeResult.assertionPassed !== geminiResult.assertionPassed) {
+        if (claudeResult.assertionPassed !== secondaryResult.assertionPassed) {
           logger.debug("Models disagree on assertion result, consulting arbiter...");
           const arbiterResult = await withTimeout(
-            getArbiterDecision(claudeResult, geminiResult),
+            getArbiterDecision(claudeResult, secondaryResult),
             ASSERTION_MODEL_TIMEOUT,
           );
 
@@ -279,13 +308,13 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
         }
 
         // Assertion passes only if both models agree it should pass
-        const assertionPassed = claudeResult.assertionPassed && geminiResult.assertionPassed;
+        const assertionPassed = claudeResult.assertionPassed && secondaryResult.assertionPassed;
 
         // Calculate average confidence score
-        const confidenceScore = (claudeResult.confidenceScore + geminiResult.confidenceScore) / 2;
+        const confidenceScore = (claudeResult.confidenceScore + secondaryResult.confidenceScore) / 2;
 
-        // For now take Gemini's reasoning for simplicity
-        const reasoning = geminiResult.reasoning;
+        // For now take the secondary model's reasoning for simplicity
+        const reasoning = secondaryResult.reasoning;
 
         return {
           assertionPassed,

@@ -24,6 +24,8 @@ export type ModelConfig = {
   assertionSecondary?: string;
   /** Model for assertion arbiter. Default: google/gemini-3.1-pro-preview */
   assertionArbiter?: string;
+  /** Model for optional CUA mode. Default: google/gemini-3-flash */
+  cua?: string;
   /** Model for data extraction, wait conditions, and lightweight tasks. Default: google/gemini-2.5-flash */
   utility?: string;
 };
@@ -35,6 +37,7 @@ export const DEFAULT_MODELS: Required<ModelConfig> = {
   assertionPrimary: "anthropic/claude-haiku-4.5",
   assertionSecondary: "google/gemini-3-flash",
   assertionArbiter: "google/gemini-3.1-pro-preview",
+  cua: "google/gemini-3-flash",
   utility: "google/gemini-2.5-flash",
 };
 
@@ -42,6 +45,8 @@ type Config = {
   email?: EmailProvider;
   ai?: {
     gateway?: AIGateway;
+    /** When true, enables CUA mode which prefers the CUA model for some AI tasks */
+    cuaMode?: boolean;
     models?: ModelConfig;
   };
   /** Base path for file uploads. Default: "./uploads" */
