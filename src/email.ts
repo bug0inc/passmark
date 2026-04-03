@@ -1,3 +1,4 @@
+import { ConfigurationError, AIModelError } from "./errors";
 import { getConfig } from "./config";
 import { EMAIL_INITIAL_WAIT, EMAIL_RETRY_DELAY, MAX_RETRIES } from "./constants";
 import { logger } from "./logger";
@@ -5,9 +6,10 @@ import { logger } from "./logger";
 function getEmailProvider() {
   const provider = getConfig().email;
   if (!provider) {
-    throw new Error(
-      "Email provider not configured. Call configure({ email: ... }) before using email features.",
+    throw new ConfigurationError(
+     "Email provider not configured. Call configure({ email: ... }) before using email features.",
     );
+   
   }
   return provider;
 }
@@ -92,7 +94,7 @@ export async function extractEmailContent({
     }
   }
 
-  throw new Error(
-    `Failed to extract email content after ${maxRetries} attempts. Email: ${email}, Prompt: ${prompt}`,
+  throw new AIModelError(
+   `Failed to extract email content after ${maxRetries} attempts. Email: ${email}, Prompt: ${prompt}`,
   );
 }
