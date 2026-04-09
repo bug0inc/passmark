@@ -1,3 +1,4 @@
+import { StepExecutionError, ValidationError } from "./errors";
 import "./instrumentation"; // For Axiom AI instrumentation
 
 import {
@@ -175,7 +176,7 @@ export const runSteps = async ({
     // Script mode: execute script directly, skip AI and cache
     if (step.isScript) {
       if (!step.script) {
-        throw new Error(`Script step ${step.description} has no script content.`);
+        throw new ValidationError(`Script step ${step.description} has no script content.`);
       }
 
       logger.debug(`Executing Script Step: ${step.description}`);
@@ -488,7 +489,7 @@ export const runSteps = async ({
       });
     }
 
-    throw new Error(errorDescription);
+    throw new StepExecutionError(errorDescription, stepThatFailed);
   }
 
   if (processedAssertions && processedAssertions.length > 0 && expect) {
@@ -697,3 +698,4 @@ export { extractEmailContent, generateEmail } from "./email";
 export { assert } from "./assertion";
 
 export type { AssertionResult } from "./types";
+export { PassmarkError, StepExecutionError, ValidationError, AIModelError, CacheError, ConfigurationError } from "./errors";

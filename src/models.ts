@@ -1,3 +1,4 @@
+import { AIModelError, ConfigurationError } from "./errors";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -17,7 +18,7 @@ let _openrouter: ReturnType<typeof createOpenRouter> | null = null;
 function getGoogleProvider() {
   if (!_google) {
     if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-      throw new Error(
+      throw new ConfigurationError(
         "GOOGLE_GENERATIVE_AI_API_KEY isn't set. Add it to your environment (for example: export GOOGLE_GENERATIVE_AI_API_KEY=your_key), or use a gateway by calling configure({ ai: { gateway: 'vercel' } }) with AI_GATEWAY_API_KEY, or configure({ ai: { gateway: 'openrouter' } }) with OPENROUTER_API_KEY. See .env.example for reference.",
       );
     }
@@ -31,7 +32,7 @@ function getGoogleProvider() {
 function getAnthropicProvider() {
   if (!_anthropic) {
     if (!process.env.ANTHROPIC_API_KEY) {
-      throw new Error(
+      throw new ConfigurationError(
         "ANTHROPIC_API_KEY isn't set. Add it to your environment (for example: export ANTHROPIC_API_KEY=your_key), or use a gateway by calling configure({ ai: { gateway: 'vercel' } }) with AI_GATEWAY_API_KEY, or configure({ ai: { gateway: 'openrouter' } }) with OPENROUTER_API_KEY. See .env.example for reference.",
       );
     }
@@ -45,7 +46,7 @@ function getAnthropicProvider() {
 function getOpenRouterProvider() {
   if (!_openrouter) {
     if (!process.env.OPENROUTER_API_KEY) {
-      throw new Error(
+      throw new ConfigurationError(
         "OPENROUTER_API_KEY isn't set. Add it to your environment (for example: export OPENROUTER_API_KEY=your_key). See .env.example for reference.",
       );
     }
@@ -100,8 +101,8 @@ export function resolveModel(modelId: string): LanguageModel {
 
   if (gatewayConfig === "vercel") {
     if (!process.env.AI_GATEWAY_API_KEY) {
-      throw new Error(
-        "AI_GATEWAY_API_KEY isn't set. To use the Vercel AI Gateway, add AI_GATEWAY_API_KEY to your environment (for example, in a .env file). If you'd rather use direct provider keys, call configure({ ai: { gateway: 'none' } }) and set GOOGLE_GENERATIVE_AI_API_KEY and/or ANTHROPIC_API_KEY.",
+      throw new ConfigurationError(
+        "AI_GATEWAY_API_KEY isn't set. To use the Vercel AI Gateway, add AI_GATEWAY_API_KEY to your environment. If you'd rather use direct provider keys, call configure({ ai: { gateway: 'none' } }) and set GOOGLE_GENERATIVE_AI_API_KEY and/or ANTHROPIC_API_KEY.",
       );
     }
     return wrapModel(gateway(modelId));
@@ -120,6 +121,6 @@ export function resolveModel(modelId: string): LanguageModel {
     case "anthropic":
       return wrapModel(getAnthropicProvider()(resolveDirectModelName(modelName)));
     default:
-      throw new Error(`Unknown AI provider: ${provider}`);
+      throw new AIModelError(`Unknown AI provider: ${provider}`);
   }
 }
