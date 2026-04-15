@@ -182,6 +182,7 @@ configure({
 | `REDIS_URL` | No | - | Redis connection URL for step caching and global state |
 | `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude models |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models |
+| `OPENAI_API_KEY` | No | - | OpenAI API key for OpenAI models |
 | `AI_GATEWAY_API_KEY` | If gateway=vercel | - | Vercel AI Gateway API key |
 | `OPENROUTER_API_KEY` | If gateway=openrouter | - | OpenRouter API key |
 | `AXIOM_TOKEN` | No | - | Axiom token for OpenTelemetry tracing |
