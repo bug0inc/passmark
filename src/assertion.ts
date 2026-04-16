@@ -76,7 +76,8 @@ function createArbiterFunction(
   imageContent: Array<{ type: "image"; image: string }>,
   assertion: string,
   snapshot: string,
-  images?: string[]
+  images: string[] | undefined,
+  thinkingEnabled: boolean = false
 ): ModelAssertionFunction {
   return async (): Promise<AssertionResult> => {
     const resultsSummary = modelResults
@@ -138,15 +139,26 @@ Please carefully review the evidence (screenshot and accessibility snapshot when
     ];
 
     const arbiterModelId = getModelId("assertionArbiter");
+    const isGoogleModel = arbiterModelId.toLowerCase().includes('google') || arbiterModelId.toLowerCase().includes('gemini');
+    
+    const providerOptions: Record<string, any> = {
+      openrouter: {
+        reasoning: { max_tokens: THINKING_BUDGET_DEFAULT },
+      },
+    };
+    
+    if (thinkingEnabled && isGoogleModel) {
+      providerOptions.google = {
+        thinkingConfig: {
+          thinkingBudget: THINKING_BUDGET_DEFAULT,
+        },
+      };
+    }
     
     const { output } = await generateText({
       model: resolveModel(arbiterModelId),
       temperature: 0,
-      providerOptions: {
-        openrouter: {
-          reasoning: { max_tokens: THINKING_BUDGET_DEFAULT },
-        },
-      },
+      providerOptions,
       messages: arbiterMessages,
       output: Output.object({ schema: assertionSchema }),
     });
@@ -171,12 +183,15 @@ function checkConsensus(results: AssertionResult[]): {
   // Unanimous consensus
   if (passedCount === results.length || failedCount === results.length) {
     const avgConfidence = results.reduce((sum, r) => sum + r.confidenceScore, 0) / results.length;
+    // For backward compatibility: 2 models use secondary (index 1), 3+ use first
+    const reasoningIndex = results.length === 2 ? 1 : 0;
+    
     return {
       hasConsensus: true,
       consensusResult: {
         assertionPassed: passedCount === results.length,
         confidenceScore: Math.round(avgConfidence),
-        reasoning: results[0].reasoning, // Use first model's reasoning
+        reasoning: results[reasoningIndex].reasoning,
       },
       passedCount,
       failedCount,
@@ -185,6 +200,16 @@ function checkConsensus(results: AssertionResult[]): {
   
   // Majority vote (for 3+ models)
   if (results.length >= 3) {
+    // Check for tie - if tie, return no majorityResult so arbiter is consulted
+    if (passedCount === failedCount) {
+      return {
+        hasConsensus: false,
+        passedCount,
+        failedCount,
+        // No majorityResult - this will trigger arbiter
+      };
+    }
+    
     const majorityPassed = passedCount > failedCount;
     const majorityResults = results.filter(r => r.assertionPassed === majorityPassed);
     const avgConfidence = majorityResults.reduce((sum, r) => sum + r.confidenceScore, 0) / majorityResults.length;
@@ -250,10 +275,6 @@ export const assert = async ({
   
   // Get the list of models to use for assertions
   const assertionModels = getAssertionModelsList();
-  
-  if (assertionModels.length === 0) {
-    throw new Error("No assertion models configured. Please configure at least one model for assertions.");
-  }
 
   const runFullAssertion = async (): Promise<AssertionResult> => {
     const snapshot = await safeSnapshot(page);
@@ -357,7 +378,8 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
             imageContent,
             assertion,
             snapshot,
-            images
+            images,
+            thinkingEnabled
           );
           return await withTimeout(arbiterFn(), ASSERTION_MODEL_TIMEOUT);
         }
@@ -371,7 +393,7 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
           return consensus.majorityResult;
         }
         
-        // Fallback: Use arbiter for any unresolved cases
+        // Fallback: Use arbiter for any unresolved cases (including ties)
         logger.debug("Consulting arbiter for final decision...");
         const arbiterFn = createArbiterFunction(
           modelResults,
@@ -379,7 +401,8 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
           imageContent,
           assertion,
           snapshot,
-          images
+          images,
+          thinkingEnabled
         );
         return await withTimeout(arbiterFn(), ASSERTION_MODEL_TIMEOUT);
         

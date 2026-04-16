@@ -1,3 +1,5 @@
+import { logger } from "./logger";
+
 export type EmailProvider = {
   /** Domain for generating test emails (e.g. "emailsink.dev") */
   domain: string;
@@ -96,7 +98,7 @@ export function configure(config: Config) {
   if (models) {
     const assertionModels = getAssertionModelsList(models);
     if (assertionModels.length < 2) {
-      console.warn(
+      logger.warn(
         'Passmark: At least 2 assertion models are recommended for reliable consensus validation.'
       );
     }
@@ -140,20 +142,20 @@ export function getAssertionModelsList(models?: ModelConfig): string[] {
   }
   
   // Fall back to primary/secondary for backward compatibility
-  const models_list: string[] = [];
+  const modelsList: string[] = [];
   if (configModels.assertionPrimary) {
-    models_list.push(configModels.assertionPrimary);
+    modelsList.push(configModels.assertionPrimary);
   }
   if (configModels.assertionSecondary) {
-    models_list.push(configModels.assertionSecondary);
+    modelsList.push(configModels.assertionSecondary);
   }
   
   // If nothing configured, use defaults
-  if (models_list.length === 0) {
+  if (modelsList.length === 0) {
     return [DEFAULT_MODELS.assertionPrimary, DEFAULT_MODELS.assertionSecondary];
   }
   
-  return models_list;
+  return modelsList;
 }
 
 /** @internal Reset config to empty state. Used for testing only. */
