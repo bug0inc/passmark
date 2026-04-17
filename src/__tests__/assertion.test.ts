@@ -29,6 +29,7 @@ vi.mock("ai", async (importOriginal) => {
 vi.mock("../utils", () => ({
   safeSnapshot: vi.fn().mockResolvedValue("snapshot content"),
   withTimeout: vi.fn((p: Promise<unknown>) => p),
+  resolvePage: vi.fn((input: unknown) => input),
 }));
 
 import { assert } from "../assertion";

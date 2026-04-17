@@ -53,6 +53,7 @@ vi.mock("../../utils", () => ({
   waitForCondition: vi.fn().mockResolvedValue(undefined),
   waitForDOMStabilization: vi.fn().mockResolvedValue(undefined),
   generatePhoneNumber: vi.fn().mockReturnValue("1234567890"),
+  resolvePage: vi.fn((input: unknown) => input),
 }));
 
 // Mock extract module
@@ -99,6 +100,10 @@ function createMockPage() {
     fill: vi.fn().mockResolvedValue(undefined),
     describe: vi.fn().mockReturnThis(),
   };
+  const mockContext = {
+    on: vi.fn(),
+    off: vi.fn(),
+  };
   return {
     locator: vi.fn().mockReturnValue(mockLocator),
     getByRole: vi.fn().mockReturnValue(mockLocator),
@@ -108,6 +113,7 @@ function createMockPage() {
     url: vi.fn().mockReturnValue("https://example.com"),
     evaluate: vi.fn().mockResolvedValue(undefined),
     waitForLoadState: vi.fn().mockResolvedValue(undefined),
+    context: vi.fn().mockReturnValue(mockContext),
   } as unknown as Page;
 }
 
