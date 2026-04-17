@@ -44,9 +44,9 @@ describe("config", () => {
     expect(getConfig().uploadBasePath).toBe("./second");
   });
 
-  it("getModelId returns default for each of the 7 keys", () => {
+  it("getModelId returns default for each of the 8 keys", () => {
     const keys = Object.keys(DEFAULT_MODELS) as Array<keyof typeof DEFAULT_MODELS>;
-    expect(keys).toHaveLength(7);
+    expect(keys).toHaveLength(8);
 
     for (const key of keys) {
       expect(getModelId(key)).toBe(DEFAULT_MODELS[key]);
