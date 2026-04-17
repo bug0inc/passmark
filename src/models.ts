@@ -1,6 +1,7 @@
 import { AIModelError, ConfigurationError } from "./errors";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { gateway, type LanguageModel } from "ai";
 import { wrapAISDKModel } from "axiom/ai";
@@ -13,6 +14,7 @@ function wrapModel(model: LanguageModel): LanguageModel {
 
 let _google: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 let _anthropic: ReturnType<typeof createAnthropic> | null = null;
+let _openai: ReturnType<typeof createOpenAI> | null = null;
 let _openrouter: ReturnType<typeof createOpenRouter> | null = null;
 let _cloudflareGoogle: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 let _cloudflareAnthropic: ReturnType<typeof createAnthropic> | null = null;
@@ -43,6 +45,20 @@ function getAnthropicProvider() {
     });
   }
   return _anthropic;
+}
+
+function getOpenAIProvider() {
+  if (!_openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new ConfigurationError(
+        "OPENAI_API_KEY isn't set. Add it to your environment (for example: export OPENAI_API_KEY=your_key), or use a gateway by calling configure({ ai: { gateway: 'vercel' } }) with AI_GATEWAY_API_KEY, or configure({ ai: { gateway: 'openrouter' } }) with OPENROUTER_API_KEY. See .env.example for reference.",
+      );
+    }
+    _openai = createOpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return _openai;
 }
 
 function getOpenRouterProvider() {
@@ -201,6 +217,8 @@ export function resolveModel(modelId: string): LanguageModel {
       return wrapModel(getGoogleProvider()(resolveDirectModelName(modelName)));
     case "anthropic":
       return wrapModel(getAnthropicProvider()(resolveDirectModelName(modelName)));
+    case "openai":
+      return wrapModel(getOpenAIProvider()(resolveDirectModelName(modelName)));
     default:
       throw new AIModelError(`Unknown AI provider: ${provider}`);
   }
