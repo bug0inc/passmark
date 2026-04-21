@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **OpenCode Zen gateway support**: set `gateway: "opencodezen"` in `configure()` and provide `OPENCODEZEN_API_KEY` to route all model requests through [OpenCode Zen](https://opencode.ai/docs/ko/zen/) (`https://opencode.ai/zen/v1`), an OpenAI-compatible gateway with 30+ curated models including Claude, Gemini, GPT, Qwen, and more.
+
 ## [1.0.0] - 2026-03-27
 
 ### Added
