@@ -246,7 +246,7 @@ export function getAItools(page: Page, settings?: ToolSettings) {
     tools,
     getPendingCacheData: () => playwrightTools.pendingCacheData,
     clearPendingCacheData: () => {
-      playwrightTools.pendingCacheData = null;
+      playwrightTools.pendingCacheData = [];
     },
   };
 }
@@ -256,7 +256,7 @@ class PlaywrightTools {
   private tabManager?: TabManager;
   private currentStep;
   private abortController?: AbortController;
-  public pendingCacheData: Record<string, string> | null = null;
+  public pendingCacheData: Array<Record<string, string>> = [];
 
   private get page(): Page {
     return this.tabManager ? this.tabManager.active() : this.initialPage;
@@ -678,7 +678,8 @@ class PlaywrightTools {
         cacheData.value = value;
       }
 
-      this.pendingCacheData = cacheData;
+      // Accumulate — every successful AI tool call is recorded, not just the last one
+      this.pendingCacheData.push(cacheData);
     }
   }
 }

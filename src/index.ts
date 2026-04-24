@@ -261,48 +261,26 @@ export const runSteps = async ({
       }
     }
 
-    // First check if the step is cached on redis
-    const cachedStep = redis ? await redis.hgetall(`step:${userFlow}:${step.description}`) : {};
+    // Cache Retrieval
+    // Fetch the JSON-serialised action array from Redis.
+    const cacheKey = `step:${userFlow}:${step.description}`;
+    const cachedRaw = redis ? await redis.get(cacheKey) : null;
+    const cachedActions: Array<Record<string, string>> = (() => {
+      if (!cachedRaw) return [];
+      try { return JSON.parse(cachedRaw); } catch { return []; }
+    })();
 
     if (
       !bypassCache &&
       !isPlaywrightRetry &&
       !step.bypassCache &&
-      cachedStep &&
-      Object.keys(cachedStep).length > 0
+      cachedActions.length > 0
     ) {
-      // Running cached step
-      logger.debug(`Executing Cached Step: ${step.description}`);
-      const locator = cachedStep["locator"];
-      const action = cachedStep["action"] as string;
-      const description = (cachedStep["description"] as string).replace(/'/g, "\\'");
-      const value = cachedStep["value"];
-      const input = step.data?.value || value;
+      logger.debug(`Executing Cached Step (${cachedActions.length} action(s)): ${step.description}`);
 
-      let code = "";
-      switch (action) {
-        case "click":
-        case "dblclick":
-          code = `await page.${locator}.describe('${description}').${action}({ timeout: ${CACHED_ACTION_TIMEOUT} });`;
-          break;
-        case "fill":
-          code = `await page.${locator}.describe('${description}').fill("${input}", { timeout: ${CACHED_ACTION_TIMEOUT} })`;
-          break;
-        case "hover":
-          code = `await page.${locator}.describe('${description}').hover({ timeout: ${CACHED_ACTION_TIMEOUT} })`;
-          break;
-        case "select-option":
-          code = `await page.${locator}.describe('${description}').selectOption("${input}", { timeout: ${CACHED_ACTION_TIMEOUT} })`;
-          break;
-        case "waitForText":
-          code = `await page.getByText("${value}", { exact: true }).first().waitFor({ state: "visible" })`;
-          break;
-      }
-
-      logger.debug(`Executing cached action:\n${code}`);
+      let cacheReplaySucceeded = false;
       try {
         let pageScreenshotBeforeApplyingAction: string = "";
-
         if (step.waitUntil) {
           pageScreenshotBeforeApplyingAction = (
             await tabManager.active().screenshot({ fullPage: false })
@@ -310,29 +288,59 @@ export const runSteps = async ({
         }
 
         /**
-         *  Before executing the first cached step, ensure the DOM is stable to avoid
-         *  taking snapshot of a loading or transitioning state. Give it higher idle time because the page might
-         *  take a bit longer to stabilize right after navigation.
+         * Before executing the first cached step, ensure the DOM is stable to avoid
+         * taking a snapshot of a loading or transitioning state.
          */
-        const INITIAL_DOM_STABILIZATION_IDLE_TIME = INITIAL_DOM_STABILIZATION_IDLE;
         if (i === 0) {
-          await waitForDOMStabilization(tabManager, test, INITIAL_DOM_STABILIZATION_IDLE_TIME);
+          await waitForDOMStabilization(tabManager, test, INITIAL_DOM_STABILIZATION_IDLE);
         }
 
-        const pageSnapshotBeforeApplyingAction = await safeSnapshot(tabManager);
-        await runLocatorCode(tabManager, code);
+        // Pipelined replay loop
+        for (const cachedAction of cachedActions) {
+          const action = cachedAction["action"];
+          const locator = cachedAction["locator"];
+          const description = (cachedAction["description"] ?? "").replace(/'/g, "\\'");
+          // Re-apply placeholder values so {{run.email}} etc. stay consistent
+          // with the current run's localValues / globalValues.
+          const rawValue = cachedAction["value"];
+          const resolvedValue = rawValue
+            ? replacePlaceholders(rawValue, localValues, globalValues, projectDataValues)
+            : undefined;
+          const input = step.data?.value ?? resolvedValue;
 
-        /**
-         *  Verify that the action had the intended effect on the page. This is because sometimes cached pw action may silently fail.
-         *
-         *  Before verifying, this function will wait for the DOM to stabilize.
-         *  stabilization idle time is set to 500ms by default.
-         *
-         *  This means workflow is this: action performed -> wait for DOM stabilization -> check if action had effect -> next step
-         *
-         *  Auto healing will be triggered if the action did not have any effect on the page.
-         */
-        await verifyActionEffect(tabManager, action, pageSnapshotBeforeApplyingAction);
+          let code = "";
+          switch (action) {
+            case "click":
+            case "dblclick":
+              code = `await page.${locator}.describe('${description}').${action}({ timeout: ${CACHED_ACTION_TIMEOUT} });`;
+              break;
+            case "fill":
+              code = `await page.${locator}.describe('${description}').fill("${input}", { timeout: ${CACHED_ACTION_TIMEOUT} })`;
+              break;
+            case "hover":
+              code = `await page.${locator}.describe('${description}').hover({ timeout: ${CACHED_ACTION_TIMEOUT} })`;
+              break;
+            case "select-option":
+              code = `await page.${locator}.describe('${description}').selectOption("${input}", { timeout: ${CACHED_ACTION_TIMEOUT} })`;
+              break;
+            case "waitForText":
+              code = `await page.getByText("${resolvedValue}", { exact: true }).first().waitFor({ state: "visible" })`;
+              break;
+          }
+
+          logger.debug(`Replaying cached action:\n${code}`);
+          const pageSnapshotBefore = await safeSnapshot(tabManager);
+          await runLocatorCode(tabManager, code); // throws on timeout → caught below
+
+          /**
+           * Verify each action had the intended effect before moving to the next.
+           * This is the "state dependency" check for multi-step sequences.
+           */
+          await verifyActionEffect(tabManager, action, pageSnapshotBefore);
+        }
+        // End of replay loop
+
+        cacheReplaySucceeded = true;
 
         if (step.waitUntil) {
           await waitForCondition({
@@ -345,8 +353,7 @@ export const runSteps = async ({
           });
         }
 
-        // Handle data extraction if specified
-        // This is done post cached step execution
+        // Handle data extraction post cached-step execution
         if (step.extract) {
           const snapshot = await safeSnapshot(tabManager);
           const url = tabManager.active().url();
@@ -359,9 +366,24 @@ export const runSteps = async ({
           (localValues as Record<string, string>)[placeholderKey] = extracted;
           logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
         }
+      } catch (cacheError) {
+        // Phase 3: Invalidation
+        // A step in the sequence failed (UI changed, locator stale, etc.).
+        // Evict the broken cache entry so we don't keep replaying a broken sequence.
+        logger.warn(
+          `Cached replay failed at step "${step.description}", evicting cache and falling back to AI: ${cacheError}`,
+        );
+        if (redis) {
+          await redis.del(cacheKey);
+        }
+        // Fall through to AI execution below.
+      }
+
+      if (cacheReplaySucceeded) {
+        if (onStepEnd) {
+          onStepEnd({ id, description: step.description });
+        }
         continue;
-      } catch (error) {
-        logger.debug(`Error executing cached step, falling back to AI execution: ${error}`);
       }
     }
 
@@ -437,17 +459,20 @@ export const runSteps = async ({
           }),
       );
 
-      // Cache the step action only if it was a single tool call (simple, deterministic action).
-      // Multi-step actions are not cached as they may be non-deterministic.
+      // Phase 1: Recording
+      // Capture every meaningful tool call the AI made (excluding snapshots/stop).
+      // Store the whole sequence as a JSON array — no longer limited to length === 1.
       const allToolCalls = result.steps
         .flatMap((s) => s.toolCalls)
         .filter((tool) => ["browser_snapshot", "browser_stop"].indexOf(tool.toolName) === -1);
 
-      if (allToolCalls.length === 1 && redis) {
-        const cacheData = getPendingCacheData();
-        if (cacheData) {
-          await redis.hset(`step:${userFlow}:${step.description}`, cacheData);
-          logger.debug(`Cached step action: ${step.description}`);
+      if (allToolCalls.length > 0 && redis) {
+        const allCacheData = getPendingCacheData(); // Array<Record<string, string>>
+        if (allCacheData.length > 0) {
+          await redis.set(cacheKey, JSON.stringify(allCacheData));
+          logger.debug(
+            `Cached ${allCacheData.length} action(s) for step: ${step.description}`,
+          );
         }
       }
 
@@ -533,7 +558,7 @@ export const runSteps = async ({
         images,
         failSilently: failAssertionsSilently,
         maxRetries: 1,
-        onRetry: (retryCount, previousResult) => {},
+        onRetry: (retryCount, previousResult) => { },
       });
 
       if (onReasoning) {
