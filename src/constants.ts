@@ -22,5 +22,5 @@ export const MAX_RETRIES = 3;
 // Thinking budgets (tokens)
 export const THINKING_BUDGET_DEFAULT = 1024;
 
-// Redis
+// Cache
 export const GLOBAL_VALUES_TTL_SECONDS = 86400;
