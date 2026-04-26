@@ -4,6 +4,7 @@ import { getModelId } from "./config";
 import { ASSERTION_MODEL_TIMEOUT, THINKING_BUDGET_DEFAULT } from "./constants";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
+import { trackUsage } from "./cost";
 import { AssertionResult, AssertionOptions } from "./types";
 import { resolvePage, safeSnapshot, withTimeout } from "./utils";
 
@@ -130,7 +131,7 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
     // Claude assertion function
     const getClaudeAssertion = async (): Promise<AssertionResult> => {
       // First get Claude's text response with thinking if enabled
-      const { text } = await generateText({
+      const textResult = await generateText({
         model: resolveModel(getModelId("assertionPrimary")),
         temperature: 0,
         providerOptions: thinkingEnabled
@@ -146,20 +147,28 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
         messages,
       });
 
+      if (textResult.usage) {
+        await trackUsage(getModelId("assertionPrimary"), textResult.usage);
+      }
+
       // Convert Claude's response to structured format using Haiku
-      const { output } = await generateText({
+      const outputResult = await generateText({
         model: resolveModel(getModelId("assertionPrimary")),
         temperature: 0.1,
-        prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
+        prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${textResult.text}`,
         output: Output.object({ schema: assertionSchema }),
       });
 
-      return output;
+      if (outputResult.usage) {
+        await trackUsage(getModelId("assertionPrimary"), outputResult.usage);
+      }
+
+      return outputResult.output;
     };
 
     // Gemini assertion function
     const getGeminiAssertion = async (): Promise<AssertionResult> => {
-      const { output } = await generateText({
+      const outputResult = await generateText({
         model: resolveModel(getModelId("assertionSecondary")),
         temperature: 0,
         providerOptions: thinkingEnabled
@@ -178,7 +187,11 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
         output: Output.object({ schema: assertionSchema }),
       });
 
-      return output;
+      if (outputResult.usage) {
+        await trackUsage(getModelId("assertionSecondary"), outputResult.usage);
+      }
+
+      return outputResult.output;
     };
 
     // Arbiter function using Gemini 2.5 Pro with thinking enabled
@@ -241,7 +254,7 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
         },
       ];
 
-      const { output } = await generateText({
+      const outputResult = await generateText({
         model: resolveModel(getModelId("assertionArbiter")),
         temperature: 0,
         providerOptions: {
@@ -258,7 +271,11 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
         output: Output.object({ schema: assertionSchema }),
       });
 
-      return output;
+      if (outputResult.usage) {
+        await trackUsage(getModelId("assertionArbiter"), outputResult.usage);
+      }
+
+      return outputResult.output;
     };
 
     const runAssertion = async (attempt = 0): Promise<AssertionResult> => {

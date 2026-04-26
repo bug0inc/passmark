@@ -62,6 +62,18 @@ type Config = {
   };
   /** Base path for file uploads. Default: "./uploads" */
   uploadBasePath?: string;
+  /**
+   * Maximum allowed LLM usage cost per run in USD.
+   * If the cumulative cost of AI calls exceeds this budget, an error is thrown.
+   * Helps prevent bill shock.
+   */
+  maxCostPerRun?: number;
+  /**
+   * Custom pricing overrides for specific models.
+   * Key: model ID (e.g. "google/gemini-3-flash")
+   * Value: { input: number, output: number } where numbers are cost per 1M tokens.
+   */
+  pricing?: Record<string, { input: number; output: number }>;
 };
 
 let globalConfig: Config = {};
