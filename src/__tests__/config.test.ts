@@ -29,6 +29,11 @@ describe("config", () => {
     expect(getConfig().ai?.gateway).toBe("openrouter");
   });
 
+  it("configure sets ai.gateway to litellm", () => {
+    configure({ ai: { gateway: "litellm" } });
+    expect(getConfig().ai?.gateway).toBe("litellm");
+  });
+
   it("configure merges without overwriting other keys", () => {
     configure({ uploadBasePath: "./uploads" });
     configure({ ai: { gateway: "none" } });
