@@ -2,6 +2,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getModelId } from "./config";
 import { resolveModel } from "./models";
+import { trackUsage } from "./cost";
 
 const extractionSchema = z.object({
   extractedValue: z.string().describe("The extracted value based on the prompt"),
@@ -35,7 +36,7 @@ export async function extractDataWithAI({
   url: string;
   prompt: string;
 }): Promise<string> {
-  const { output } = await generateText({
+  const outputResult = await generateText({
     model: resolveModel(getModelId("utility")),
     temperature: 0,
     output: Output.object({ schema: extractionSchema }),
@@ -66,5 +67,9 @@ ${prompt}
 Return the extracted value.`,
   });
 
-  return output.extractedValue;
+  if (outputResult.usage) {
+    await trackUsage(getModelId("utility"), outputResult.usage);
+  }
+
+  return outputResult.output.extractedValue;
 }

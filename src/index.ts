@@ -41,6 +41,7 @@ import {
   resolveEmailPlaceholders,
 } from "./data-cache";
 import { getConfig, getMode, getModelId } from "./config";
+import { trackUsage } from "./cost";
 import { runCUALoop, buildRunStepsPromptCUA, buildRunUserFlowPromptCUA } from "./cua";
 import { extractDataWithAI } from "./extract";
 import { logger } from "./logger";
@@ -508,6 +509,10 @@ export const runSteps = async ({
           }),
       );
 
+      if (result.usage) {
+        await trackUsage(getModelId("stepExecution"), result.usage);
+      }
+
       // Cache the step action only if it was a single tool call (simple, deterministic action).
       // Multi-step actions are not cached as they may be non-deterministic.
       const allToolCalls = result.steps
@@ -671,7 +676,7 @@ export const runUserFlow = async ({
       );
 
       if (assertion) {
-        const { output } = await generateText({
+        const outputResult = await generateText({
           model: resolveModel(getModelId("utility")),
           prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
           output: Output.object({
@@ -686,7 +691,12 @@ export const runUserFlow = async ({
             }),
           }),
         });
-        return output;
+        
+        if (outputResult.usage) {
+          await trackUsage(getModelId("utility"), outputResult.usage);
+        }
+        
+        return outputResult.output;
       }
 
       return text;
@@ -706,7 +716,7 @@ export const runUserFlow = async ({
   });
 
   try {
-    const { text } = await maybeWithSpan(
+    const textResult = await maybeWithSpan(
       { capability: "user_flow_execution", step: "agentic_tool_calling" },
       async () => {
         return generateText({
@@ -749,10 +759,14 @@ export const runUserFlow = async ({
       },
     );
 
+    if (textResult.usage) {
+      await trackUsage(effort === "low" ? getModelId("userFlowLow") : getModelId("userFlowHigh"), textResult.usage);
+    }
+
     if (assertion) {
-      const { output } = await generateText({
+      const outputResult = await generateText({
         model: resolveModel(getModelId("utility")),
-        prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
+        prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${textResult.text}`,
         output: Output.object({
           schema: z.object({
             assertionPassed: z.boolean().describe("Indicates whether the assertion passed or not."),
@@ -766,10 +780,14 @@ export const runUserFlow = async ({
         }),
       });
 
-      return output;
+      if (outputResult.usage) {
+        await trackUsage(getModelId("utility"), outputResult.usage);
+      }
+
+      return outputResult.output;
     }
 
-    return text;
+    return textResult.text;
   } catch (error: unknown) {
     logger.error({ err: error }, "Error during user flow execution");
   }

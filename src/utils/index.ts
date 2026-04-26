@@ -12,6 +12,7 @@ import { z } from "zod";
 import { getModelId } from "../config";
 import { logger } from "../logger";
 import { resolveModel } from "../models";
+import { trackUsage } from "../cost";
 import {
   PageInput,
   WaitConditionResult,
@@ -300,7 +301,7 @@ ${condition}
 Analyze the attached before and after screenshots and determine if the wait condition has been met.
 `;
 
-    const { output } = await generateText({
+    const outputResult = await generateText({
       model: resolveModel(getModelId("utility")),
       temperature: 0,
       messages: [
@@ -316,7 +317,11 @@ Analyze the attached before and after screenshots and determine if the wait cond
       output: Output.object({ schema: waitConditionSchema }),
     });
 
-    return output;
+    if (outputResult.usage) {
+      await trackUsage(getModelId("utility"), outputResult.usage);
+    }
+
+    return outputResult.output;
   };
 
   while (Date.now() - startTime < timeout) {

@@ -90,3 +90,12 @@ export class ValidationError extends PassmarkError {
     super(message, "VALIDATION_ERROR");
   }
 }
+
+/**
+ * Thrown when the LLM usage cost exceeds the configured maxCostPerRun budget.
+ */
+export class BudgetExceededError extends PassmarkError {
+  constructor(message: string) {
+    super(message, "BUDGET_EXCEEDED");
+  }
+}

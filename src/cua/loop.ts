@@ -5,6 +5,7 @@ import { logger } from "../logger";
 import { waitForDOMStabilization } from "../utils";
 import { executeAction, type ComputerAction } from "./actions";
 import { getOpenAIClient } from "./client";
+import { trackUsage } from "../cost";
 
 export type RunCUALoopOptions = {
   page: Page;
@@ -40,6 +41,10 @@ type CUAResponse = {
   id: string;
   output?: CUAOutputItem[];
   output_text?: string;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+  };
 };
 
 type OpenAIWithResponses = OpenAI & {
@@ -107,6 +112,12 @@ export async function runCUALoop({
   let response: CUAResponse;
   try {
     response = await openai.responses.create(initialRequest, { signal: abortSignal });
+    if (response.usage) {
+      await trackUsage(model, {
+        promptTokens: response.usage.prompt_tokens,
+        completionTokens: response.usage.completion_tokens,
+      });
+    }
   } catch (err: unknown) {
     const e = err as OpenAIErrorLike;
     logger.error(
@@ -170,6 +181,13 @@ export async function runCUALoop({
       },
       { signal: abortSignal },
     );
+
+    if (response.usage) {
+      await trackUsage(model, {
+        promptTokens: response.usage.prompt_tokens,
+        completionTokens: response.usage.completion_tokens,
+      });
+    }
   }
 
   logger.warn(`[cua] loop hit maxSteps=${maxSteps} without model stopping`);
