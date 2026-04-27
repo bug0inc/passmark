@@ -40,7 +40,8 @@ import {
   replacePlaceholders,
   resolveEmailPlaceholders,
 } from "./data-cache";
-import { getConfig, getModelId } from "./config";
+import { resolveAI } from "./config";
+import { runCUALoop, buildRunStepsPromptCUA, buildRunUserFlowPromptCUA } from "./cua";
 import { extractDataWithAI } from "./extract";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
@@ -102,6 +103,7 @@ export const runSteps = async ({
   projectId,
   executionId,
   failAssertionsSilently,
+  ai: callLevelAi,
 }: RunStepsOptions) => {
   executionId = executionId || process.env.executionId;
 
@@ -173,6 +175,9 @@ export const runSteps = async ({
 
     const step = await resolveEmailPlaceholders(currentStep, dynamicEmail);
     const id = shortid.generate();
+
+    // Resolve effective AI config for this step. Step > runSteps call > global.
+    const effectiveAi = resolveAI(callLevelAi, step.ai);
 
     if (onStepStart) {
       onStepStart({ id, description: step.description });
@@ -269,6 +274,76 @@ export const runSteps = async ({
       if (!cachedRaw) return [];
       try { return JSON.parse(cachedRaw); } catch { return []; }
     })();
+    // CUA mode: use OpenAI Responses API + built-in `computer` tool instead of
+    // the ARIA-snapshot path. Coord-based actions aren't cacheable, so we skip
+    // the redis cache lookup and the Vercel AI SDK step.
+    if (effectiveAi.mode === "cua") {
+      logger.debug(`Executing Step (CUA): ${step.description}`);
+
+      let pageScreenshotBeforeApplyingAction = "";
+      if (step.waitUntil) {
+        pageScreenshotBeforeApplyingAction = (
+          await tabManager.active().screenshot({ fullPage: false })
+        ).toString("base64");
+      }
+
+      try {
+        await maybeWithSpan(
+          { capability: "step_execution", step: "cua_loop" },
+          () =>
+            runCUALoop({
+              page: tabManager.active(),
+              instruction: buildRunStepsPromptCUA({
+                auth,
+                steps: processedSteps,
+                step,
+                userFlow,
+                stepIndex: i,
+              }),
+              maxSteps: STEP_EXECUTION_MAX_STEPS,
+              abortSignal: AbortSignal.timeout(STEP_EXECUTION_TIMEOUT),
+              onReasoning: onReasoning
+                ? (reasoning) => onReasoning({ id, reasoning })
+                : undefined,
+              gateway: effectiveAi.gateway,
+            }),
+        );
+      } catch (error: unknown) {
+        logger.error({ err: error }, `CUA step execution failed: ${step.description}`);
+        errorInStepExecution = error instanceof Error ? error.message : String(error);
+        stepThatFailed = step.description;
+        break;
+      }
+
+      if (step.waitUntil) {
+        await waitForCondition({
+          page: tabManager,
+          condition: step.waitUntil,
+          pageScreenshotBeforeApplyingAction,
+          previousSteps: processedSteps.slice(0, i),
+          currentStep: step,
+          nextStep: processedSteps[i + 1],
+        });
+      }
+
+      if (step.extract) {
+        const snapshot = await safeSnapshot(tabManager);
+        const url = tabManager.active().url();
+        const extracted = await extractDataWithAI({
+          snapshot,
+          url,
+          prompt: step.extract.prompt,
+        });
+        const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
+        (localValues as Record<string, string>)[placeholderKey] = extracted;
+        logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
+      }
+
+      if (onStepEnd) {
+        onStepEnd({ id, description: step.description });
+      }
+      continue;
+    }
 
     if (
       !bypassCache &&
@@ -406,9 +481,10 @@ export const runSteps = async ({
       );
     }
 
-    const model = resolveModel(getModelId("stepExecution"));
+    const stepModelId = effectiveAi.getModelId("stepExecution");
+    const model = resolveModel(stepModelId, effectiveAi.gateway);
     logger.debug(
-      `Using model: ${getModelId("stepExecution")} for step execution / gateway: ${getConfig().ai?.gateway ?? "none"}`,
+      `Using model: ${stepModelId} for step execution / gateway: ${effectiveAi.gateway}`,
     );
 
     try {
@@ -606,13 +682,57 @@ export const runUserFlow = async ({
   assertion,
   effort = "low",
   thinkingBudget = THINKING_BUDGET_DEFAULT,
+  ai: callLevelAi,
 }: UserFlowOptions) => {
   const abortController = new AbortController();
+  const effectiveAi = resolveAI(callLevelAi);
+
+  // CUA mode: skip the Vercel AI SDK path entirely. Run the Responses API loop,
+  // then reuse the existing utility-model assertion parser on its final text.
+  if (effectiveAi.mode === "cua") {
+    try {
+      const text = await maybeWithSpan(
+        { capability: "user_flow_execution", step: "cua_loop" },
+        () =>
+          runCUALoop({
+            page,
+            instruction: buildRunUserFlowPromptCUA({ userFlow, steps, assertion }),
+            maxSteps: USER_FLOW_MAX_STEPS,
+            abortSignal: abortController.signal,
+            gateway: effectiveAi.gateway,
+          }),
+      );
+
+      if (assertion) {
+        const { output } = await generateText({
+          model: resolveModel(effectiveAi.getModelId("utility"), effectiveAi.gateway),
+          prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
+          output: Output.object({
+            schema: z.object({
+              assertionPassed: z.boolean().describe("Indicates whether the assertion passed or not."),
+              confidenceScore: z
+                .number()
+                .describe("Confidence score of the assertion, between 0 and 100."),
+              reasoning: z
+                .string()
+                .describe("Brief explanation of the reasoning behind the assertion."),
+            }),
+          }),
+        });
+        return output;
+      }
+
+      return text;
+    } catch (error: unknown) {
+      logger.error({ err: error }, "Error during CUA user flow execution");
+      return;
+    }
+  }
 
   const model =
     effort === "low"
-      ? resolveModel(getModelId("userFlowLow"))
-      : resolveModel(getModelId("userFlowHigh"));
+      ? resolveModel(effectiveAi.getModelId("userFlowLow"), effectiveAi.gateway)
+      : resolveModel(effectiveAi.getModelId("userFlowHigh"), effectiveAi.gateway);
 
   const { tools } = getAItools(page, {
     abortController,
@@ -664,7 +784,7 @@ export const runUserFlow = async ({
 
     if (assertion) {
       const { output } = await generateText({
-        model: resolveModel(getModelId("utility")),
+        model: resolveModel(effectiveAi.getModelId("utility"), effectiveAi.gateway),
         prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
         output: Output.object({
           schema: z.object({
