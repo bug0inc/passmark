@@ -56,13 +56,21 @@ export const DEFAULT_MODELS: Required<ModelConfig> = {
   visualRegressionExplanation: "google/gemini-3-flash",
 };
 
+/**
+ * Per-call / per-step override of the global `ai` config. Same shape as
+ * `Config["ai"]`, all fields optional. Used by `runSteps`, individual `Step`s,
+ * and `runUserFlow` to switch mode/gateway/models for part of a run without
+ * touching `configure()`.
+ */
+export type AIOverride = {
+  gateway?: AIGateway;
+  mode?: AIMode;
+  models?: ModelConfig;
+};
+
 type Config = {
   email?: EmailProvider;
-  ai?: {
-    gateway?: AIGateway;
-    mode?: AIMode;
-    models?: ModelConfig;
-  };
+  ai?: AIOverride;
   /** Base path for file uploads. Default: "./uploads" */
   uploadBasePath?: string;
 };
@@ -116,6 +124,58 @@ export function getModelId(key: keyof ModelConfig): string {
  */
 export function getMode(): AIMode {
   return getConfig().ai?.mode ?? "snapshot";
+}
+
+/**
+ * Effective AI config for a single step / call after merging overrides with
+ * the global config. `getModelId` looks up a model with the same precedence
+ * as the layer search.
+ */
+export type ResolvedAI = {
+  mode: AIMode;
+  gateway: AIGateway;
+  getModelId: (key: keyof ModelConfig) => string;
+};
+
+const CUA_LOCK_MESSAGE =
+  `[passmark] ai.models.cua is not user-configurable — CUA mode is locked to "${DEFAULT_MODELS.cua}". ` +
+  `Remove the "cua" field from your ai config.`;
+
+/**
+ * Merge AI overrides into the global config. Later args win.
+ *
+ * Precedence (right-to-left): the last override wins, then earlier overrides,
+ * then the global `configure()` value, then `DEFAULT_MODELS`.
+ *
+ * Example: `resolveAI(callLevelAi, stepAi)` → step beats call beats global.
+ *
+ * Throws if any override sets `models.cua` (CUA model is locked, same rule
+ * `configure()` enforces).
+ */
+export function resolveAI(...overrides: (AIOverride | undefined)[]): ResolvedAI {
+  for (const layer of overrides) {
+    if (layer?.models?.cua !== undefined) {
+      throw new Error(CUA_LOCK_MESSAGE);
+    }
+  }
+  const layers: (AIOverride | undefined)[] = [getConfig().ai, ...overrides];
+  const lastDefined = <K extends "mode" | "gateway">(key: K): AIOverride[K] => {
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const v = layers[i]?.[key];
+      if (v !== undefined) return v;
+    }
+    return undefined;
+  };
+  const mode = (lastDefined("mode") as AIMode | undefined) ?? "snapshot";
+  const gateway = (lastDefined("gateway") as AIGateway | undefined) ?? "none";
+  const getModelIdForKey = (key: keyof ModelConfig): string => {
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const v = layers[i]?.models?.[key];
+      if (v !== undefined) return v;
+    }
+    return DEFAULT_MODELS[key];
+  };
+  return { mode, gateway, getModelId: getModelIdForKey };
 }
 
 /** @internal Reset config to empty state. Used for testing only. */

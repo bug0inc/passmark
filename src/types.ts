@@ -8,6 +8,7 @@ import {
   PlaywrightWorkerOptions,
   TestType,
 } from "@playwright/test";
+import type { AIOverride } from "./config";
 import type { TabManager } from "./utils/tab-manager";
 
 export type PageInput = Page | TabManager;
@@ -32,6 +33,11 @@ export type UserFlowOptions = {
     password: string;
   };
   model?: LanguageModel;
+  /**
+   * Override the AI mode/gateway/models for this user-flow run only.
+   * Falls back to the global `configure()` values when omitted.
+   */
+  ai?: AIOverride;
 };
 
 /**
@@ -57,6 +63,12 @@ export type Step = {
   extract?: ExtractionConfig;
   /** Switch the active page before this step runs. 'main' = original tab, 'latest' = most recently opened, or numeric index. */
   switchToTab?: "main" | "latest" | number;
+  /**
+   * Override the AI mode/gateway/models for just this step. Lets you mix
+   * snapshot and CUA steps in the same `runSteps` call. Beats both the
+   * `runSteps` call-level `ai` and the global `configure()` value.
+   */
+  ai?: AIOverride;
 };
 
 export type AssertionOptions = {
@@ -116,6 +128,12 @@ export type RunStepsOptions = {
    * Required when using {{global.*}} placeholders.
    */
   executionId?: string;
+  /**
+   * Default AI override applied to every step in this call. Individual
+   * `step.ai` overrides take precedence over this; this takes precedence
+   * over the global `configure()` value.
+   */
+  ai?: AIOverride;
 } & (
     | {
       assertions: Omit<AssertionOptions, "page" | "test" | "expect">[];

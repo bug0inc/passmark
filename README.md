@@ -135,10 +135,33 @@ test("Shopping cart tests", async ({ page }) => {
 
 Notes:
 
-- CUA mode uses OpenAI's `gpt-5.5` + built-in `computer` tool.
+- CUA mode uses OpenAI's `gpt-5.5` + built-in `computer` tool. The CUA model is currently locked and not user-configurable.
 - Redis step caching is skipped in CUA mode because coordinate actions aren't portable across viewport sizes.
 - `gateway: "vercel" | "openrouter" | "cloudflare"` is not compatible with CUA — the Responses-API `computer` tool is only exposed on direct OpenAI access.
 - Account requirements: your OpenAI API key must have access to the CUA model and the built-in `computer` tool on the Responses API.
+
+#### Per-step overrides (hybrid runs)
+
+The same `ai` shape accepted by `configure()` can also be passed at the `runSteps`/`runUserFlow` call level **and** on individual `Step`s. This lets you mix snapshot steps (cheap, cacheable, OpenRouter/Vercel/etc.) with CUA steps (visual, direct OpenAI) in a single run. Precedence: `step.ai` ▶ call-level `ai` ▶ global `configure()`.
+
+```typescript
+configure({ ai: { gateway: "openrouter" } }); // most steps go through OpenRouter
+
+await runSteps({
+  page, test, expect,
+  userFlow: "Buy product on sale",
+  steps: [
+    { description: "Navigate to /products" },                     // OpenRouter snapshot
+    {
+      description: "Drag the price slider to $40",
+      ai: { mode: "cua", gateway: "none" },                       // CUA for this step only
+    },
+    { description: "Click Add to cart" },                         // back to OpenRouter snapshot
+  ],
+});
+```
+
+Set `OPENAI_API_KEY` whenever any step opts into `mode: "cua"`. CUA steps still require `gateway: "none"`; mixing CUA with a non-`none` gateway throws at the per-step level for the same reason it does globally.
 
 ## Features
 

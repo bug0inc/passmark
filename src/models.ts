@@ -4,7 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { gateway, type LanguageModel } from "ai";
 import { wrapAISDKModel } from "axiom/ai";
-import { getConfig } from "./config";
+import { type AIGateway, getConfig } from "./config";
 import { axiomEnabled } from "./instrumentation";
 
 function wrapModel(model: LanguageModel): LanguageModel {
@@ -163,9 +163,14 @@ function resolveOpenRouterModelId(modelId: string): string {
  * like Gemini's thought_signature pass through unchanged.
  * When gateway is "none" (default), creates a direct provider instance with alias resolution.
  * All paths wrap the model with wrapAISDKModel for tracing when Axiom is enabled.
+ *
+ * @param modelId - Canonical model id, e.g. "google/gemini-3-flash".
+ * @param gatewayOverride - Optional resolved gateway for this call. When omitted,
+ *   falls back to the global `configure()` value. Pass this when a per-step or
+ *   per-call `ai` override changes the gateway for a single resolution.
  */
-export function resolveModel(modelId: string): LanguageModel {
-  const gatewayConfig = getConfig().ai?.gateway ?? "none";
+export function resolveModel(modelId: string, gatewayOverride?: AIGateway): LanguageModel {
+  const gatewayConfig = gatewayOverride ?? getConfig().ai?.gateway ?? "none";
 
   if (gatewayConfig === "vercel") {
     if (!process.env.AI_GATEWAY_API_KEY) {

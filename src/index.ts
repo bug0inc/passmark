@@ -34,7 +34,7 @@ import {
   replacePlaceholders,
   resolveEmailPlaceholders,
 } from "./data-cache";
-import { getConfig, getMode, getModelId } from "./config";
+import { resolveAI } from "./config";
 import { runCUALoop, buildRunStepsPromptCUA, buildRunUserFlowPromptCUA } from "./cua";
 import { extractDataWithAI } from "./extract";
 import { logger } from "./logger";
@@ -99,6 +99,7 @@ export const runSteps = async ({
   projectId,
   executionId,
   failAssertionsSilently,
+  ai: callLevelAi,
 }: RunStepsOptions) => {
   executionId = executionId || process.env.executionId;
 
@@ -170,6 +171,9 @@ export const runSteps = async ({
 
     const step = await resolveEmailPlaceholders(currentStep, dynamicEmail);
     const id = shortid.generate();
+
+    // Resolve effective AI config for this step. Step > runSteps call > global.
+    const effectiveAi = resolveAI(callLevelAi, step.ai);
 
     if (onStepStart) {
       onStepStart({ id, description: step.description });
@@ -261,7 +265,7 @@ export const runSteps = async ({
     // CUA mode: use OpenAI Responses API + built-in `computer` tool instead of
     // the ARIA-snapshot path. Coord-based actions aren't cacheable, so we skip
     // the redis cache lookup and the Vercel AI SDK step.
-    if (getMode() === "cua") {
+    if (effectiveAi.mode === "cua") {
       logger.debug(`Executing Step (CUA): ${step.description}`);
 
       let pageScreenshotBeforeApplyingAction = "";
@@ -289,6 +293,7 @@ export const runSteps = async ({
               onReasoning: onReasoning
                 ? (reasoning) => onReasoning({ id, reasoning })
                 : undefined,
+              gateway: effectiveAi.gateway,
             }),
         );
       } catch (error: unknown) {
@@ -653,12 +658,14 @@ export const runUserFlow = async ({
   assertion,
   effort = "low",
   thinkingBudget = THINKING_BUDGET_DEFAULT,
+  ai: callLevelAi,
 }: UserFlowOptions) => {
   const abortController = new AbortController();
+  const effectiveAi = resolveAI(callLevelAi);
 
   // CUA mode: skip the Vercel AI SDK path entirely. Run the Responses API loop,
   // then reuse the existing utility-model assertion parser on its final text.
-  if (getMode() === "cua") {
+  if (effectiveAi.mode === "cua") {
     try {
       const text = await maybeWithSpan(
         { capability: "user_flow_execution", step: "cua_loop" },
@@ -668,6 +675,7 @@ export const runUserFlow = async ({
             instruction: buildRunUserFlowPromptCUA({ userFlow, steps, assertion }),
             maxSteps: USER_FLOW_MAX_STEPS,
             abortSignal: abortController.signal,
+            gateway: effectiveAi.gateway,
           }),
       );
 
@@ -705,8 +713,8 @@ export const runUserFlow = async ({
 
   const model =
     effort === "low"
-      ? resolveModel(getModelId("userFlowLow"))
-      : resolveModel(getModelId("userFlowHigh"));
+      ? resolveModel(effectiveAi.getModelId("userFlowLow"), effectiveAi.gateway)
+      : resolveModel(effectiveAi.getModelId("userFlowHigh"), effectiveAi.gateway);
 
   const { tools } = getAItools(page, {
     abortController,
