@@ -2,6 +2,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getModelId } from "./config";
 import { resolveModel } from "./models";
+import type { UsageTracker } from "./usage";
 
 const extractionSchema = z.object({
   extractedValue: z.string().describe("The extracted value based on the prompt"),
@@ -30,12 +31,14 @@ export async function extractDataWithAI({
   snapshot,
   url,
   prompt,
+  usageTracker,
 }: {
   snapshot: string;
   url: string;
   prompt: string;
+  usageTracker?: UsageTracker;
 }): Promise<string> {
-  const { output } = await generateText({
+  const { output, usage } = await generateText({
     model: resolveModel(getModelId("utility")),
     temperature: 0,
     output: Output.object({ schema: extractionSchema }),
@@ -65,6 +68,8 @@ ${prompt}
 
 Return the extracted value.`,
   });
+
+  usageTracker?.record({ model: getModelId("utility"), operation: "extraction", usage });
 
   return output.extractedValue;
 }

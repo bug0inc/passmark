@@ -101,6 +101,7 @@ import { generateText } from "ai";
 import { runCUALoop } from "../../cua";
 import type { Page } from "@playwright/test";
 import type { Step } from "../../types";
+import type { UsageResult } from "../../usage";
 
 function createMockPage() {
   const mockLocator = {
@@ -325,10 +326,7 @@ describe("runSteps", () => {
   it("call-level ai option applies to all steps without per-step override", async () => {
     const page = createMockPage();
 
-    const steps: Step[] = [
-      { description: "Step A" },
-      { description: "Step B" },
-    ];
+    const steps: Step[] = [{ description: "Step A" }, { description: "Step B" }];
 
     await runSteps({
       page,
@@ -381,5 +379,50 @@ describe("runSteps", () => {
 
     // generateText should be called because the step has bypassCache: true
     expect(generateText).toHaveBeenCalled();
+  });
+
+  it("returns usage data from AI step execution", async () => {
+    const page = createMockPage();
+    const steps: Step[] = [{ description: "Step 1" }, { description: "Step 2" }];
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "done",
+      steps: [],
+      usage: { inputTokens: 500, outputTokens: 100, totalTokens: 600 },
+    } as any);
+
+    const result = await runSteps({
+      page,
+      userFlow: "usage tracking flow",
+      steps,
+    });
+
+    expect(result).toBeDefined();
+    const usage = result as UsageResult;
+    expect(usage.details).toHaveLength(2);
+    expect(usage.totalTokens).toBe(1200);
+    expect(usage.details[0].operation).toBe("stepExecution");
+  });
+
+  it("returns zero-token usage for cached steps", async () => {
+    const page = createMockPage();
+    const steps: Step[] = [{ description: "Cached step" }];
+
+    vi.mocked(redis!.hgetall).mockResolvedValue({
+      locator: 'getByRole("button", { name: "Go" })',
+      action: "click",
+      description: "Go button",
+      value: "",
+    });
+
+    const result = await runSteps({
+      page,
+      userFlow: "cached usage flow",
+      steps,
+    });
+
+    expect(result).toBeDefined();
+    const usage = result as UsageResult;
+    expect(usage.totalTokens).toBe(0);
   });
 });

@@ -9,6 +9,7 @@ import {
   TestType,
 } from "@playwright/test";
 import type { AIOverride } from "./config";
+import type { UsageTracker } from "./usage";
 import type { TabManager } from "./utils/tab-manager";
 
 export type PageInput = Page | TabManager;
@@ -84,6 +85,8 @@ export type AssertionOptions = {
   images?: string[];
   maxRetries?: number;
   onRetry?: (retryCount: number, previousResult: AssertionResult) => void;
+  /** When provided, token usage from AI calls is recorded into this tracker. */
+  usageTracker?: UsageTracker;
 };
 
 export type WaitConditionResult = {
@@ -101,6 +104,8 @@ export type WaitForConditionOptions = {
   initialInterval?: number; // Initial wait interval in ms which will be increased exponentially
   timeout?: number; // We'll stop trying after this time
   maxInterval?: number; // Maximum wait interval in ms
+  /** When provided, token usage from AI calls is recorded into this tracker. */
+  usageTracker?: UsageTracker;
 };
 
 export type RunStepsOptions = {
@@ -135,9 +140,9 @@ export type RunStepsOptions = {
    */
   ai?: AIOverride;
 } & (
-    | {
+  | {
       assertions: Omit<AssertionOptions, "page" | "test" | "expect">[];
       expect: Expect<{}>;
     }
-    | { assertions?: never; expect?: never }
-  );
+  | { assertions?: never; expect?: never }
+);

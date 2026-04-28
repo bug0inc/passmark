@@ -45,6 +45,7 @@ import { runCUALoop, buildRunStepsPromptCUA, buildRunUserFlowPromptCUA } from ".
 import { extractDataWithAI } from "./extract";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
+import { createUsageTracker, type UsageResult } from "./usage";
 import { runSecureScript } from "./utils/secure-script-runner";
 import { createTabManager } from "./utils/tab-manager";
 import {
@@ -104,7 +105,8 @@ export const runSteps = async ({
   executionId,
   failAssertionsSilently,
   ai: callLevelAi,
-}: RunStepsOptions) => {
+}: RunStepsOptions): Promise<UsageResult> => {
+  const usageTracker = createUsageTracker();
   executionId = executionId || process.env.executionId;
 
   // Track all open tabs for this run. The active page is updated automatically
@@ -126,7 +128,8 @@ export const runSteps = async ({
   const isPlaywrightRetry = test ? test.info().retry > 0 : false;
   if (isPlaywrightRetry) {
     logger.debug(
-      `Playwright retry detected (retry #${test!.info().retry
+      `Playwright retry detected (retry #${
+        test!.info().retry
       }). Bypassing cache and using AI only.`,
     );
   }
@@ -280,25 +283,21 @@ export const runSteps = async ({
       }
 
       try {
-        await maybeWithSpan(
-          { capability: "step_execution", step: "cua_loop" },
-          () =>
-            runCUALoop({
-              page: tabManager.active(),
-              instruction: buildRunStepsPromptCUA({
-                auth,
-                steps: processedSteps,
-                step,
-                userFlow,
-                stepIndex: i,
-              }),
-              maxSteps: STEP_EXECUTION_MAX_STEPS,
-              abortSignal: AbortSignal.timeout(STEP_EXECUTION_TIMEOUT),
-              onReasoning: onReasoning
-                ? (reasoning) => onReasoning({ id, reasoning })
-                : undefined,
-              gateway: effectiveAi.gateway,
+        await maybeWithSpan({ capability: "step_execution", step: "cua_loop" }, () =>
+          runCUALoop({
+            page: tabManager.active(),
+            instruction: buildRunStepsPromptCUA({
+              auth,
+              steps: processedSteps,
+              step,
+              userFlow,
+              stepIndex: i,
             }),
+            maxSteps: STEP_EXECUTION_MAX_STEPS,
+            abortSignal: AbortSignal.timeout(STEP_EXECUTION_TIMEOUT),
+            onReasoning: onReasoning ? (reasoning) => onReasoning({ id, reasoning }) : undefined,
+            gateway: effectiveAi.gateway,
+          }),
         );
       } catch (error: unknown) {
         logger.error({ err: error }, `CUA step execution failed: ${step.description}`);
@@ -455,9 +454,9 @@ export const runSteps = async ({
     let pageScreenshotBeforeApplyingAction: string = "";
 
     if (step.waitUntil) {
-      pageScreenshotBeforeApplyingAction = (await tabManager.active().screenshot({ fullPage: false })).toString(
-        "base64",
-      );
+      pageScreenshotBeforeApplyingAction = (
+        await tabManager.active().screenshot({ fullPage: false })
+      ).toString("base64");
     }
 
     const stepModelId = effectiveAi.getModelId("stepExecution");
@@ -485,7 +484,7 @@ export const runSteps = async ({
               openrouter: {
                 reasoning: {
                   effort: "medium",
-                  exclude: true
+                  exclude: true,
                 },
               },
             },
@@ -513,6 +512,8 @@ export const runSteps = async ({
             }),
           }),
       );
+
+      usageTracker.record({ model: stepModelId, operation: "stepExecution", usage: result.usage });
 
       // Cache the step action only if it was a single tool call (simple, deterministic action).
       // Multi-step actions are not cached as they may be non-deterministic.
@@ -544,6 +545,7 @@ export const runSteps = async ({
         previousSteps: processedSteps.slice(0, i),
         currentStep: step,
         nextStep: processedSteps[i + 1],
+        usageTracker,
       });
     }
 
@@ -556,6 +558,7 @@ export const runSteps = async ({
         snapshot,
         url,
         prompt: step.extract.prompt,
+        usageTracker,
       });
       const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
       (localValues as Record<string, string>)[placeholderKey] = extracted;
@@ -611,6 +614,7 @@ export const runSteps = async ({
         failSilently: failAssertionsSilently,
         maxRetries: 1,
         onRetry: (retryCount, previousResult) => {},
+        usageTracker,
       });
 
       if (onReasoning) {
@@ -625,6 +629,8 @@ export const runSteps = async ({
       }
     }
   }
+
+  return usageTracker.getResult();
 };
 
 /**
@@ -660,6 +666,7 @@ export const runUserFlow = async ({
   thinkingBudget = THINKING_BUDGET_DEFAULT,
   ai: callLevelAi,
 }: UserFlowOptions) => {
+  const usageTracker = createUsageTracker();
   const abortController = new AbortController();
   const effectiveAi = resolveAI(callLevelAi);
 
@@ -680,12 +687,14 @@ export const runUserFlow = async ({
       );
 
       if (assertion) {
-        const { output } = await generateText({
+        const { output, usage: parseUsage } = await generateText({
           model: resolveModel(effectiveAi.getModelId("utility"), effectiveAi.gateway),
           prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
           output: Output.object({
             schema: z.object({
-              assertionPassed: z.boolean().describe("Indicates whether the assertion passed or not."),
+              assertionPassed: z
+                .boolean()
+                .describe("Indicates whether the assertion passed or not."),
               confidenceScore: z
                 .number()
                 .describe("Confidence score of the assertion, between 0 and 100."),
@@ -695,10 +704,15 @@ export const runUserFlow = async ({
             }),
           }),
         });
-        return output;
+        usageTracker.record({
+          model: effectiveAi.getModelId("utility"),
+          operation: "userFlow",
+          usage: parseUsage,
+        });
+        return { ...output, usage: usageTracker.getResult() };
       }
 
-      return text;
+      return { text, usage: usageTracker.getResult() };
     } catch (error: unknown) {
       logger.error({ err: error }, "Error during CUA user flow execution");
       return;
@@ -715,7 +729,7 @@ export const runUserFlow = async ({
   });
 
   try {
-    const { text } = await maybeWithSpan(
+    const { text, usage: flowUsage } = await maybeWithSpan(
       { capability: "user_flow_execution", step: "agentic_tool_calling" },
       async () => {
         return generateText({
@@ -758,8 +772,14 @@ export const runUserFlow = async ({
       },
     );
 
+    const flowModelId =
+      effort === "low"
+        ? effectiveAi.getModelId("userFlowLow")
+        : effectiveAi.getModelId("userFlowHigh");
+    usageTracker.record({ model: flowModelId, operation: "userFlow", usage: flowUsage });
+
     if (assertion) {
-      const { output } = await generateText({
+      const { output, usage: parseUsage } = await generateText({
         model: resolveModel(effectiveAi.getModelId("utility"), effectiveAi.gateway),
         prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
         output: Output.object({
@@ -774,11 +794,16 @@ export const runUserFlow = async ({
           }),
         }),
       });
+      usageTracker.record({
+        model: effectiveAi.getModelId("utility"),
+        operation: "userFlow",
+        usage: parseUsage,
+      });
 
-      return output;
+      return { ...output, usage: usageTracker.getResult() };
     }
 
-    return text;
+    return { text, usage: usageTracker.getResult() };
   } catch (error: unknown) {
     logger.error({ err: error }, "Error during user flow execution");
   }
@@ -833,4 +858,13 @@ export { extractEmailContent, generateEmail } from "./email";
 export { assert } from "./assertion";
 
 export type { AssertionResult } from "./types";
-export { PassmarkError, StepExecutionError, ValidationError, AIModelError, CacheError, ConfigurationError } from "./errors";
+export { createUsageTracker } from "./usage";
+export type { TokenUsage, UsageResult } from "./usage";
+export {
+  PassmarkError,
+  StepExecutionError,
+  ValidationError,
+  AIModelError,
+  CacheError,
+  ConfigurationError,
+} from "./errors";
