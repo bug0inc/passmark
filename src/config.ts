@@ -40,6 +40,8 @@ export type ModelConfig = {
    * Override may be re-enabled in a future release.
    */
   cua?: string;
+  /** Model for explaining visual regression failures. Default: google/gemini-3-flash */
+  visualRegressionExplanation?: string;
 };
 
 export const DEFAULT_MODELS: Required<ModelConfig> = {
@@ -51,6 +53,7 @@ export const DEFAULT_MODELS: Required<ModelConfig> = {
   assertionArbiter: "google/gemini-3.1-pro-preview",
   utility: "google/gemini-2.5-flash",
   cua: "gpt-5.5",
+  visualRegressionExplanation: "google/gemini-3-flash",
 };
 
 /**
