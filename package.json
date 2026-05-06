@@ -1,6 +1,6 @@
 {
   "name": "passmark",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "The open-source AI framework for regression testing.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
