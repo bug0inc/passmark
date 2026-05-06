@@ -1,15 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock instrumentation (imported as side effect)
-vi.mock("../../instrumentation", () => ({ axiomEnabled: false }));
+// Mock instrumentation
+vi.mock("../../instrumentation", () => ({
+  isAxiomEnabled: () => false,
+  initTelemetry: vi.fn(),
+}));
 
 // Mock Redis
+const mockRedis = {
+  hgetall: vi.fn().mockResolvedValue({}),
+  hset: vi.fn().mockResolvedValue("OK"),
+  expire: vi.fn().mockResolvedValue(1),
+};
 vi.mock("../../redis", () => ({
-  redis: {
-    hgetall: vi.fn().mockResolvedValue({}),
-    hset: vi.fn().mockResolvedValue("OK"),
-    expire: vi.fn().mockResolvedValue(1),
-  },
+  getRedis: () => mockRedis,
 }));
 
 // Mock AI SDK
@@ -96,7 +100,6 @@ vi.mock("../../cua", () => ({
 
 import { runSteps } from "../../index";
 import { configure, resetConfig } from "../../config";
-import { redis } from "../../redis";
 import { generateText } from "ai";
 import { runCUALoop } from "../../cua";
 import type { Page } from "@playwright/test";
@@ -130,7 +133,7 @@ describe("runSteps", () => {
     vi.clearAllMocks();
     resetConfig();
     // Reset redis mock to default empty
-    vi.mocked(redis!.hgetall).mockResolvedValue({});
+    vi.mocked(mockRedis.hgetall).mockResolvedValue({});
   });
 
   it("executes a simple step", async () => {
@@ -207,7 +210,7 @@ describe("runSteps", () => {
     const steps: Step[] = [{ description: "Click submit" }];
 
     // Mock redis to return cached step data
-    vi.mocked(redis!.hgetall).mockResolvedValue({
+    vi.mocked(mockRedis.hgetall).mockResolvedValue({
       locator: 'getByRole("button", { name: "Submit" })',
       action: "click",
       description: "Submit button",
@@ -229,7 +232,7 @@ describe("runSteps", () => {
     const steps: Step[] = [{ description: "Click submit" }];
 
     // Mock redis to return cached step data
-    vi.mocked(redis!.hgetall).mockResolvedValue({
+    vi.mocked(mockRedis.hgetall).mockResolvedValue({
       locator: 'getByRole("button", { name: "Submit" })',
       action: "click",
       description: "Submit button",
@@ -364,7 +367,7 @@ describe("runSteps", () => {
     const page = createMockPage();
 
     // Mock redis to return cached data
-    vi.mocked(redis!.hgetall).mockResolvedValue({
+    vi.mocked(mockRedis.hgetall).mockResolvedValue({
       locator: 'getByRole("button", { name: "Go" })',
       action: "click",
       description: "Go button",

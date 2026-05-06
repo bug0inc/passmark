@@ -1,3 +1,5 @@
+import { initTelemetry } from "./instrumentation";
+
 export type EmailProvider = {
   /** Domain for generating test emails (e.g. "emailsink.dev") */
   domain: string;
@@ -65,11 +67,37 @@ export type AIOverride = {
   models?: ModelConfig;
 };
 
+export type RedisConfig = {
+  /**
+   * Redis connection URL used for step caching, {{global.*}} placeholders,
+   * and project data. Falls back to `process.env.REDIS_URL` when omitted.
+   * If neither is set, those features are disabled.
+   */
+  url?: string;
+};
+
+export type TelemetryConfig = {
+  /**
+   * Axiom API token for OpenTelemetry tracing of AI calls.
+   * Falls back to `process.env.AXIOM_TOKEN` when omitted.
+   */
+  axiomToken?: string;
+  /**
+   * Axiom dataset for trace storage.
+   * Falls back to `process.env.AXIOM_DATASET` when omitted.
+   */
+  axiomDataset?: string;
+};
+
 type Config = {
   email?: EmailProvider;
   ai?: AIOverride;
   /** Base path for file uploads. Default: "./uploads" */
   uploadBasePath?: string;
+  /** Redis connection. When omitted, falls back to `REDIS_URL` env var. */
+  redis?: RedisConfig;
+  /** Telemetry (Axiom) connection. When omitted, falls back to `AXIOM_TOKEN`/`AXIOM_DATASET` env vars. */
+  telemetry?: TelemetryConfig;
 };
 
 let globalConfig: Config = {};
@@ -96,6 +124,10 @@ export function configure(config: Config) {
     );
   }
   globalConfig = { ...globalConfig, ...config };
+
+  if (config.telemetry) {
+    initTelemetry();
+  }
 }
 
 /**

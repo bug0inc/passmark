@@ -5,10 +5,10 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { gateway, type LanguageModel } from "ai";
 import { wrapAISDKModel } from "axiom/ai";
 import { type AIGateway, getConfig } from "./config";
-import { axiomEnabled } from "./instrumentation";
+import { isAxiomEnabled } from "./instrumentation";
 
 function wrapModel(model: LanguageModel): LanguageModel {
-  return axiomEnabled ? wrapAISDKModel(model) : model;
+  return isAxiomEnabled() ? wrapAISDKModel(model) : model;
 }
 
 let _google: ReturnType<typeof createGoogleGenerativeAI> | null = null;

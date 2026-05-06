@@ -1,5 +1,4 @@
 import { StepExecutionError, ValidationError } from "./errors";
-import "./instrumentation"; // For Axiom AI instrumentation
 
 import {
   PlaywrightTestArgs,
@@ -11,18 +10,18 @@ import {
 import { generateText, hasToolCall, Output, stepCountIs } from "ai";
 import { withSpan } from "axiom/ai";
 import shortid from "shortid";
-import { axiomEnabled } from "./instrumentation";
+import { initTelemetry, isAxiomEnabled } from "./instrumentation";
 
 // Only use withSpan when Axiom is configured, otherwise just execute the function directly
 async function maybeWithSpan<T>(
   meta: { capability: string; step: string },
   fn: () => Promise<T>,
 ): Promise<T> {
-  return axiomEnabled ? withSpan(meta, async () => fn()) : fn();
+  return isAxiomEnabled() ? withSpan(meta, async () => fn()) : fn();
 }
 import { z } from "zod";
 import { buildRunStepsPrompt, buildRunUserFlowPrompt } from "./prompts";
-import { redis } from "./redis";
+import { getRedis } from "./redis";
 import { getAItools } from "./tools";
 import { RunStepsOptions, UserFlowOptions } from "./types";
 import {
@@ -107,10 +106,15 @@ export const runSteps = async ({
 }: RunStepsOptions) => {
   executionId = executionId || process.env.executionId;
 
+  // Initialize Axiom telemetry now that any user `configure()` call has run.
+  // Idempotent — re-entry is a no-op.
+  initTelemetry();
+
   // Track all open tabs for this run. The active page is updated automatically
   // when a new tab opens, or explicitly via the `switchToTab` step field.
   const tabManager = createTabManager(page);
 
+  const redis = getRedis();
   if (!redis) {
     logger.warn(
       "Redis not configured. Step caching is disabled — all steps will use AI execution.",

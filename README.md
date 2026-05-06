@@ -248,7 +248,7 @@ configure({
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `REDIS_URL` | No | - | Redis connection URL for step caching and global state |
+| `REDIS_URL` | No | - | Redis connection URL for step caching and global state. Can also be set via `configure({ redis: { url } })`, which takes precedence. |
 | `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude models |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models |
 | `AI_GATEWAY_API_KEY` | If gateway=vercel | - | Vercel AI Gateway API key |
@@ -257,8 +257,8 @@ configure({
 | `CLOUDFLARE_AI_GATEWAY` | If gateway=cloudflare | - | Cloudflare AI Gateway name (slug) |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | If gateway=cloudflare and the gateway is authenticated | - | Cloudflare AI Gateway token (sent as `cf-aig-authorization`) |
 | `OPENAI_API_KEY` | If mode=cua | - | OpenAI API key (required for CUA mode; must have Responses-API `computer` tool access) |
-| `AXIOM_TOKEN` | No | - | Axiom token for OpenTelemetry tracing |
-| `AXIOM_DATASET` | No | - | Axiom dataset for trace storage |
+| `AXIOM_TOKEN` | No | - | Axiom token for OpenTelemetry tracing. Can also be set via `configure({ telemetry: { axiomToken } })`, which takes precedence. |
+| `AXIOM_DATASET` | No | - | Axiom dataset for trace storage. Can also be set via `configure({ telemetry: { axiomDataset } })`, which takes precedence. |
 | `PASSMARK_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
 
 ## Model Configuration
@@ -280,6 +280,8 @@ All models are configurable via `configure({ ai: { models: { ... } } })`:
 
 Passmark caches successful step actions in Redis. On subsequent runs, cached steps execute directly without AI calls, dramatically reducing latency and cost.
 
+Provide the connection via `configure({ redis: { url } })` or the `REDIS_URL` env var (configure value wins). Without either, caching, `{{global.*}}` placeholders, and project data are disabled.
+
 - Steps are cached by `userFlow` + `step.description`
 - Set `bypassCache: true` on individual steps or the entire run to force AI execution
 - Cache is automatically bypassed on Playwright retries
@@ -287,9 +289,18 @@ Passmark caches successful step actions in Redis. On subsequent runs, cached ste
 
 ## Telemetry
 
-Telemetry is opt-in. Set `AXIOM_TOKEN` and `AXIOM_DATASET` to enable OpenTelemetry tracing via Axiom. All AI calls are wrapped with `withSpan` for observability.
+Telemetry is opt-in. Either set the `AXIOM_TOKEN` and `AXIOM_DATASET` env vars, or pass them through `configure()`:
 
-Without these env vars, telemetry is a no-op.
+```typescript
+configure({
+  telemetry: {
+    axiomToken: process.env.MY_AXIOM_TOKEN,
+    axiomDataset: "passmark-traces",
+  },
+});
+```
+
+`configure()` values take precedence over env vars. Without either, telemetry is a no-op. All AI calls are wrapped with `withSpan` for observability.
 
 Configure Axiom to get a rich dashboard like this:
 
