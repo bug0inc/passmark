@@ -476,13 +476,9 @@ class PlaywrightTools {
     reasoning: z.string().describe("A quick one-line reasoning behind this action"),
   });
   public async stop(_: z.infer<typeof this.stopSchema>) {
-    const DELAY = STOP_DELAY; // 3 seconds
     // brief sleep to ensure any ongoing navigation or actions are complete
-    // In future we could add graceful stop logic here
-    await new Promise((resolve) => setTimeout(resolve, DELAY));
-    if (this.abortController) {
-      this.abortController.abort();
-    }
+    // before the agent loop terminates via the `hasToolCall("browser_stop")` stop condition
+    await new Promise((resolve) => setTimeout(resolve, STOP_DELAY));
     return { success: true, message: "Execution stopped" };
   }
 

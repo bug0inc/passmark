@@ -8,7 +8,7 @@ import {
   PlaywrightWorkerOptions,
   TestType,
 } from "@playwright/test";
-import { generateText, Output, stepCountIs } from "ai";
+import { generateText, hasToolCall, Output, stepCountIs } from "ai";
 import { withSpan } from "axiom/ai";
 import shortid from "shortid";
 import { axiomEnabled } from "./instrumentation";
@@ -501,7 +501,7 @@ export const runSteps = async ({
                 });
               });
             },
-            stopWhen: stepCountIs(STEP_EXECUTION_MAX_STEPS),
+            stopWhen: [stepCountIs(STEP_EXECUTION_MAX_STEPS), hasToolCall("browser_stop")],
             abortSignal: AbortSignal.timeout(STEP_EXECUTION_TIMEOUT),
             toolChoice: "auto",
             prompt: buildRunStepsPrompt({
@@ -735,7 +735,7 @@ export const runUserFlow = async ({
               },
             },
           },
-          stopWhen: stepCountIs(USER_FLOW_MAX_STEPS),
+          stopWhen: [stepCountIs(USER_FLOW_MAX_STEPS), hasToolCall("browser_stop")],
           abortSignal: abortController.signal,
           prepareStep: async ({ messages }) => {
             // Remove older messages to keep the context window small
