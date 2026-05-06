@@ -9,9 +9,7 @@ import { resolvePage, safeSnapshot, withTimeout } from "./utils";
 
 const assertionSchema = z.object({
   assertionPassed: z.boolean().describe("Indicates whether the assertion passed or not."),
-  confidenceScore: z
-    .number()
-    .describe("Confidence score of the assertion, between 0 and 100."),
+  confidenceScore: z.number().describe("Confidence score of the assertion, between 0 and 100."),
   reasoning: z
     .string()
     .describe(
@@ -57,6 +55,7 @@ export const assert = async ({
   failSilently,
   maxRetries = 1,
   onRetry = (retryCount: number, previousResult: AssertionResult) => {},
+  usageTracker,
 }: AssertionOptions): Promise<string> => {
   const thinkingEnabled = effort === "high";
 
@@ -65,31 +64,33 @@ export const assert = async ({
     const imageContent = images
       ? images.map((image) => ({ type: "image" as const, image }))
       : [
-        {
-          type: "image" as const,
-          image: (await resolvePage(page).screenshot({ fullPage: false })).toString("base64"),
-        },
-      ];
+          {
+            type: "image" as const,
+            image: (await resolvePage(page).screenshot({ fullPage: false })).toString("base64"),
+          },
+        ];
 
     const basePrompt = `
 You are an AI-powered QA Agent designed to test web applications.
 
 You have access to the following information. Based on this information, you'll tell us whether the assertion provided below should pass or not.
-${!images
-        ? `
+${
+  !images
+    ? `
 - An accessibility snapshot of the current page, which provides a detailed structure of the DOM
 - A screenshot of the current page`
-        : "- Screenshots from various stages of the user flow"
-      }
+    : "- Screenshots from various stages of the user flow"
+}
 
-${!images
-        ? `
+${
+  !images
+    ? `
 <Snapshot>
 ${snapshot}
 </Snapshot>
 `
-        : ""
-      }
+    : ""
+}
 
 <Assertion>
 ${assertion}
@@ -130,28 +131,38 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
     // Claude assertion function
     const getClaudeAssertion = async (): Promise<AssertionResult> => {
       // First get Claude's text response with thinking if enabled
-      const { text } = await generateText({
+      const { text, usage: textUsage } = await generateText({
         model: resolveModel(getModelId("assertionPrimary")),
         temperature: 0,
         providerOptions: thinkingEnabled
           ? {
-            anthropic: {
-              thinking: { type: "enabled", budgetTokens: THINKING_BUDGET_DEFAULT },
-            },
-            openrouter: {
-              reasoning: { max_tokens: THINKING_BUDGET_DEFAULT },
-            },
-          }
+              anthropic: {
+                thinking: { type: "enabled", budgetTokens: THINKING_BUDGET_DEFAULT },
+              },
+              openrouter: {
+                reasoning: { max_tokens: THINKING_BUDGET_DEFAULT },
+              },
+            }
           : undefined,
         messages,
       });
+      usageTracker?.record({
+        model: getModelId("assertionPrimary"),
+        operation: "assertion",
+        usage: textUsage,
+      });
 
       // Convert Claude's response to structured format using Haiku
-      const { output } = await generateText({
+      const { output, usage: structuredUsage } = await generateText({
         model: resolveModel(getModelId("assertionPrimary")),
         temperature: 0.1,
         prompt: `Convert the following text output into a valid JSON object with the specified properties:\n\n${text}`,
         output: Output.object({ schema: assertionSchema }),
+      });
+      usageTracker?.record({
+        model: getModelId("assertionPrimary"),
+        operation: "assertion",
+        usage: structuredUsage,
       });
 
       return output;
@@ -159,23 +170,28 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
 
     // Gemini assertion function
     const getGeminiAssertion = async (): Promise<AssertionResult> => {
-      const { output } = await generateText({
+      const { output, usage: geminiUsage } = await generateText({
         model: resolveModel(getModelId("assertionSecondary")),
         temperature: 0,
         providerOptions: thinkingEnabled
           ? {
-            google: {
-              thinkingConfig: {
-                thinkingBudget: THINKING_BUDGET_DEFAULT,
+              google: {
+                thinkingConfig: {
+                  thinkingBudget: THINKING_BUDGET_DEFAULT,
+                },
               },
-            },
-            openrouter: {
-              reasoning: { max_tokens: THINKING_BUDGET_DEFAULT },
-            },
-          }
+              openrouter: {
+                reasoning: { max_tokens: THINKING_BUDGET_DEFAULT },
+              },
+            }
           : undefined,
         messages,
         output: Output.object({ schema: assertionSchema }),
+      });
+      usageTracker?.record({
+        model: getModelId("assertionSecondary"),
+        operation: "assertion",
+        usage: geminiUsage,
       });
 
       return output;
@@ -199,14 +215,15 @@ Gemini's Assessment:
 - Confidence: ${geminiResult.confidenceScore}%
 - Reasoning: ${geminiResult.reasoning}
 
-${!images
-          ? `
+${
+  !images
+    ? `
 <Snapshot>
 ${snapshot}
 </Snapshot>
 `
-          : ""
-        }
+    : ""
+}
 
 <Assertion>
 ${assertion}
@@ -241,7 +258,7 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
         },
       ];
 
-      const { output } = await generateText({
+      const { output, usage: arbiterUsage } = await generateText({
         model: resolveModel(getModelId("assertionArbiter")),
         temperature: 0,
         providerOptions: {
@@ -256,6 +273,11 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
         },
         messages: arbiterMessages,
         output: Output.object({ schema: assertionSchema }),
+      });
+      usageTracker?.record({
+        model: getModelId("assertionArbiter"),
+        operation: "assertion",
+        usage: arbiterUsage,
       });
 
       return output;

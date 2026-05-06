@@ -38,6 +38,7 @@ vi.mock("../utils", () => ({
 import { assert } from "../assertion";
 import { withTimeout } from "../utils";
 import { generateText } from "ai";
+import { createUsageTracker } from "../usage";
 
 function createMockPage() {
   return {
@@ -70,13 +71,17 @@ function makeGenerateTextImpl(opts: {
       return { output: opts.claude } as any;
     }
     if (model.includes("gemini-3-flash")) {
-      const g = typeof opts.gemini === "function" ? (opts.gemini as () => AssertionObj)() : opts.gemini;
+      const g =
+        typeof opts.gemini === "function" ? (opts.gemini as () => AssertionObj)() : opts.gemini;
       return { output: g } as any;
     }
     if (model.includes("3.1-pro-preview")) {
       return {
-        output:
-          opts.arbiter ?? { assertionPassed: false, confidenceScore: 0, reasoning: "no arbiter set" },
+        output: opts.arbiter ?? {
+          assertionPassed: false,
+          confidenceScore: 0,
+          reasoning: "no arbiter set",
+        },
       } as any;
     }
     return { output: { assertionPassed: false, confidenceScore: 0, reasoning: "unknown" } } as any;
@@ -140,7 +145,11 @@ describe("assert consensus logic", () => {
       makeGenerateTextImpl({
         claude: { assertionPassed: true, confidenceScore: 95, reasoning: "Claude: yes" },
         gemini: { assertionPassed: false, confidenceScore: 30, reasoning: "Gemini: no" },
-        arbiter: { assertionPassed: true, confidenceScore: 70, reasoning: "Arbiter: I side with Claude" },
+        arbiter: {
+          assertionPassed: true,
+          confidenceScore: 70,
+          reasoning: "Arbiter: I side with Claude",
+        },
       }) as any,
     );
 
@@ -163,7 +172,11 @@ describe("assert consensus logic", () => {
       makeGenerateTextImpl({
         claude: { assertionPassed: true, confidenceScore: 60, reasoning: "Claude: yes" },
         gemini: { assertionPassed: false, confidenceScore: 40, reasoning: "Gemini: no" },
-        arbiter: { assertionPassed: false, confidenceScore: 45, reasoning: "Arbiter: I disagree, it fails" },
+        arbiter: {
+          assertionPassed: false,
+          confidenceScore: 45,
+          reasoning: "Arbiter: I disagree, it fails",
+        },
       }) as any,
     );
 
@@ -191,7 +204,11 @@ describe("assert consensus logic", () => {
           if (geminiCalls === 1) {
             throw new Error("transient model error");
           }
-          return { assertionPassed: true, confidenceScore: 80, reasoning: "Gemini: ok after retry" };
+          return {
+            assertionPassed: true,
+            confidenceScore: 80,
+            reasoning: "Gemini: ok after retry",
+          };
         },
       }) as any,
     );
@@ -213,7 +230,9 @@ describe("assert consensus logic", () => {
     const page = createMockPage();
 
     // Make withTimeout reject once to simulate timeout
-    vi.mocked(withTimeout).mockImplementationOnce(() => Promise.reject(new Error("timed out")) as any);
+    vi.mocked(withTimeout).mockImplementationOnce(
+      () => Promise.reject(new Error("timed out")) as any,
+    );
 
     vi.mocked(generateText).mockImplementation(
       makeGenerateTextImpl({
@@ -231,5 +250,46 @@ describe("assert consensus logic", () => {
     });
 
     expect(res).toContain("✅ passed");
+  });
+
+  it("records usage data when usageTracker is provided", async () => {
+    const page = createMockPage();
+    const tracker = createUsageTracker();
+
+    // Return usage data from mock generateText calls
+    vi.mocked(generateText).mockImplementation(async (args: any) => {
+      const model = String(args.model ?? "");
+      const wantsStructured = Boolean(args.output);
+      const usage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 };
+
+      if (!wantsStructured) {
+        return { text: "claude text", usage } as any;
+      }
+      if (model.includes("anthropic")) {
+        return {
+          output: { assertionPassed: true, confidenceScore: 90, reasoning: "Claude: ok" },
+          usage,
+        } as any;
+      }
+      return {
+        output: { assertionPassed: true, confidenceScore: 80, reasoning: "Gemini: ok" },
+        usage,
+      } as any;
+    });
+
+    await assert({
+      page,
+      assertion: "The page shows items",
+      test: mockTest,
+      expect: ((a: unknown, _m?: string) => ({ toBe: (_v: unknown) => {} })) as any,
+      failSilently: true,
+      usageTracker: tracker,
+    });
+
+    const result = tracker.getResult();
+    // Claude text call + Claude structured call + Gemini structured call = 3 calls
+    expect(result.details.length).toBeGreaterThanOrEqual(3);
+    expect(result.totalTokens).toBeGreaterThan(0);
+    expect(result.details.every((d) => d.operation === "assertion")).toBe(true);
   });
 });

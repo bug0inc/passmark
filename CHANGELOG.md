@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Token usage tracking**: `runSteps()` now returns a `UsageResult` with per-call token breakdowns (`inputTokens`, `outputTokens`, `totalTokens`) and aggregate totals. `runUserFlow()` includes a `usage` field in its return value. New exported types: `TokenUsage`, `UsageResult`, `UsageTracker`. New exported function: `createUsageTracker()`. Assertion, extraction, and wait-condition AI calls all participate in tracking when a `usageTracker` is provided.
 - `maxRetries` option to `AssertionOptions` (default: `1`) to control how many times a failed assertion is retried with a fresh page snapshot and screenshot. Setting it to `0` disables retries.
 - `onRetry` callback to `AssertionOptions` that fires before each retry, receiving the retry index and the full `AssertionResult` from the previous attempt for debugging flaky assertions.
 - **CUA mode** (`configure({ ai: { mode: "cua" } })`): execute `runSteps` and `runUserFlow` through OpenAI's Responses API with the built-in `computer` tool. Screenshot-driven, coordinate-based actions via Playwright's `page.mouse` / `page.keyboard`. Requires `OPENAI_API_KEY` and `gateway: "none"`; Redis step caching is skipped in this mode because coordinate actions aren't portable across viewport sizes.
