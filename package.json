@@ -45,6 +45,7 @@
     "@ai-sdk/google-vertex": "^4.0.105",
     "@ai-sdk/openai": "^3.0.52",
     "@faker-js/faker": "^10.1.0",
+    "@google/genai": "^2.1.0",
     "@openrouter/ai-sdk-provider": "^2.5.1",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.207.0",

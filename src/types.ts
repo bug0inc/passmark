@@ -84,6 +84,19 @@ export type AssertionOptions = {
   images?: string[];
   maxRetries?: number;
   onRetry?: (retryCount: number, previousResult: AssertionResult) => void;
+  /**
+   * When true, `runSteps` records a video across the step run and feeds it
+   * to a video-capable Gemini model for assertion. Useful for ephemeral UI
+   * (toasts, banners) that a single screenshot may miss. Standalone `assert`
+   * callers can also pass `videoFilePath` directly.
+   */
+  video?: boolean;
+  /**
+   * Absolute path to a pre-recorded video file (.webm/.mp4) for the
+   * assertion to evaluate. Set by `runSteps` when `video: true`; can also be
+   * supplied by callers who record their own video.
+   */
+  videoFilePath?: string;
 };
 
 export type WaitConditionResult = {

@@ -33,6 +33,7 @@ import {
 } from "./utils";
 
 import { assert } from "./assertion";
+import { VideoRecorder } from "./video";
 import {
   getDynamicEmail,
   processPlaceholders,
@@ -140,6 +141,24 @@ export const runSteps = async ({
     await processPlaceholders(steps, assertions, executionId, projectId);
 
   logger.info(`Starting step-by-step execution of ${processedSteps.length} steps.`);
+
+  // If any assertion opted into video evaluation, record a single screencast
+  // spanning the full step run. One recording is shared across all video
+  // assertions in this call; cleanup happens in a finally block below.
+  const needsVideo = processedAssertions?.some((a) => a.video) ?? false;
+  let videoRecorder: VideoRecorder | undefined;
+  if (needsVideo) {
+    videoRecorder = new VideoRecorder(tabManager.active());
+    try {
+      await videoRecorder.start();
+    } catch (error) {
+      logger.warn(
+        { err: error },
+        "Failed to start screencast — video assertions will fall back to screenshot/snapshot.",
+      );
+      videoRecorder = undefined;
+    }
+  }
 
   let errorInStepExecution,
     stepThatFailed: string = "";
@@ -582,59 +601,85 @@ export const runSteps = async ({
       });
     }
 
+    // Stop & delete the recording before re-throwing so we don't leak a
+    // running screencast or a temp file when steps fail mid-flow.
+    if (videoRecorder) {
+      await videoRecorder.stop();
+      await videoRecorder.cleanup();
+    }
+
     throw new StepExecutionError(errorDescription, stepThatFailed);
   }
 
-  if (processedAssertions && processedAssertions.length > 0 && expect) {
-    for (const { assertion: preProcessedAssertion, effort, images } of processedAssertions) {
-      // Re-resolve placeholders against the latest localValues so extracted
-      // values from steps (e.g. {{run.emailContent}}) get substituted in.
-      const assertion = replacePlaceholders(
-        preProcessedAssertion,
-        localValues,
-        globalValues,
-        projectDataValues,
-      );
-      logger.info(`Running assertion: ${assertion}`);
+  // Stop recording (if any) before running assertions so the saved file is
+  // ready to upload. Cleanup of the file happens in the finally below.
+  if (videoRecorder) {
+    await videoRecorder.stop();
+  }
 
-      const id = shortid.generate();
-
-      if (onStepStart) {
-        onStepStart({
-          id,
-          description: "Starting assertion verification",
-        });
-      }
-
-      if (onReasoning) {
-        onReasoning({
-          id,
-          reasoning: `Verifying assertion: ${assertion}`,
-        });
-      }
-
-      const reasoning = await assert({
-        page: tabManager,
-        assertion,
-        test,
-        expect,
+  try {
+    if (processedAssertions && processedAssertions.length > 0 && expect) {
+      for (const {
+        assertion: preProcessedAssertion,
         effort,
         images,
-        failSilently: failAssertionsSilently,
-        maxRetries: 1,
-        onRetry: (retryCount, previousResult) => {},
-      });
+        video,
+      } of processedAssertions) {
+        // Re-resolve placeholders against the latest localValues so extracted
+        // values from steps (e.g. {{run.emailContent}}) get substituted in.
+        const assertion = replacePlaceholders(
+          preProcessedAssertion,
+          localValues,
+          globalValues,
+          projectDataValues,
+        );
+        logger.info(`Running assertion: ${assertion}`);
 
-      if (onReasoning) {
-        onReasoning({
-          id,
-          reasoning: `\n\n${reasoning}`,
+        const id = shortid.generate();
+
+        if (onStepStart) {
+          onStepStart({
+            id,
+            description: "Starting assertion verification",
+          });
+        }
+
+        if (onReasoning) {
+          onReasoning({
+            id,
+            reasoning: `Verifying assertion: ${assertion}`,
+          });
+        }
+
+        const reasoning = await assert({
+          page: tabManager,
+          assertion,
+          test,
+          expect,
+          effort,
+          images,
+          failSilently: failAssertionsSilently,
+          maxRetries: 1,
+          onRetry: (retryCount, previousResult) => {},
+          video: video && Boolean(videoRecorder),
+          videoFilePath: videoRecorder?.filePath,
         });
-      }
 
-      if (onStepEnd) {
-        onStepEnd({ id, description: "Successfully verified assertion" });
+        if (onReasoning) {
+          onReasoning({
+            id,
+            reasoning: `\n\n${reasoning}`,
+          });
+        }
+
+        if (onStepEnd) {
+          onStepEnd({ id, description: "Successfully verified assertion" });
+        }
       }
+    }
+  } finally {
+    if (videoRecorder) {
+      await videoRecorder.cleanup();
     }
   }
 };
