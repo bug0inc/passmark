@@ -47,6 +47,12 @@ export type AssertionItem = {
   assertion: string;
   effort?: "low" | "high";
   images?: string[];
+  /**
+   * When true, `runSteps` records a video while executing the surrounding
+   * steps and passes it to the assertion for evaluation. Useful for
+   * ephemeral UI like toasts that a screenshot may miss.
+   */
+  video?: boolean;
 };
 
 export type ProcessPlaceholdersResult = {

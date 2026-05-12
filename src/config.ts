@@ -98,6 +98,12 @@ type Config = {
   redis?: RedisConfig;
   /** Telemetry (Axiom) connection. When omitted, falls back to `AXIOM_TOKEN`/`AXIOM_DATASET` env vars. */
   telemetry?: TelemetryConfig;
+  /**
+   * Directory used to temporarily store video recordings for video-flagged
+   * assertions. Defaults to `/tmp/passmark-recordings`. Files are deleted
+   * after the assertions consume them.
+   */
+  videoDir?: string;
 };
 
 let globalConfig: Config = {};

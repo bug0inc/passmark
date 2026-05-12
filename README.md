@@ -167,6 +167,7 @@ Set `OPENAI_API_KEY` whenever any step opts into `mode: "cua"`. CUA steps still 
 
 - **Core Execution** — `runSteps()` and `runUserFlow()` for flexible test orchestration in natural language, with smart caching and auto-healing
 - **Multi-Model Assertion Engine** — Consensus-based validation using Claude and Gemini, with an arbiter model to resolve disagreements
+- **Video Assertions** — Opt in per-assertion to record the full step run and evaluate the assertion against the whole video via Gemini's Files API. Useful for ephemeral UI (toasts, snackbars) that a single screenshot may miss
 - **Redis-Based Step Caching** — Cache-first execution with AI fallback and automatic self-healing when cached steps fail
 - **Configurable AI Models** — 8 dedicated model slots for step execution, assertions, extraction, and more
 - **AI Gateway Support** — Route requests through Vercel AI Gateway, OpenRouter, Cloudflare AI Gateway, or connect directly to provider SDKs
@@ -225,6 +226,34 @@ const result = await assert({
 });
 ```
 
+### Video Assertions
+
+For UI that's only visible for a second or two — toast messages, snackbar confirmations, transient banners — a single end-of-flow screenshot often misses the evidence. Set `video: true` on an assertion inside `runSteps` and Passmark will record the entire step run with `page.screencast`, upload the resulting `.webm` to Gemini's Files API, and evaluate the assertion against the full video:
+
+```typescript
+await runSteps({
+  page,
+  userFlow: "Add to cart",
+  steps: [
+    { description: "Click Acme Circles T-Shirt" },
+    { description: "Add to cart" },
+  ],
+  assertions: [
+    { assertion: "An 'Added to cart' toast appears", video: true },
+  ],
+  test,
+  expect,
+});
+```
+
+Notes:
+
+- Recording spans the **entire** step run (start of first step to end of last step). One recording is shared across all `video: true` assertions in the same `runSteps` call.
+- The video file is written to `/tmp/passmark-recordings/` by default and deleted automatically after the assertions consume it. Override via `configure({ videoDir: "/your/path" })`.
+- This path uses **only Gemini** (no Claude/Gemini consensus) since Claude doesn't accept video. The model is `gemini-3-flash-preview`.
+- Video assertions go **directly** to Gemini's Files API regardless of any configured `gateway` — file URIs are tied to the uploading Google account, so the gateway can't proxy them. You must set `GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) even when the rest of your stack runs through Vercel / OpenRouter / Cloudflare.
+- If `page.screencast.start()` fails (rare), video assertions silently fall back to the regular screenshot/snapshot path so the run still completes.
+
 ## Configuration
 
 Call `configure()` once before using any functions:
@@ -250,7 +279,7 @@ configure({
 |----------|----------|---------|-------------|
 | `REDIS_URL` | No | - | Redis connection URL for step caching and global state. Can also be set via `configure({ redis: { url } })`, which takes precedence. |
 | `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude models |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models. Also required for `video: true` assertions regardless of gateway (file URIs are tied to the uploading account). |
 | `AI_GATEWAY_API_KEY` | If gateway=vercel | - | Vercel AI Gateway API key |
 | `OPENROUTER_API_KEY` | If gateway=openrouter | - | OpenRouter API key |
 | `CLOUDFLARE_ACCOUNT_ID` | If gateway=cloudflare | - | Cloudflare account ID that owns the AI Gateway |
