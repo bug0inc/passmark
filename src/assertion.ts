@@ -1,6 +1,6 @@
 import { generateText, ModelMessage, Output } from "ai";
 import { z } from "zod";
-import { getModelId } from "./config";
+import { getConsensusPolicy, getModelId } from "./config";
 import { ASSERTION_MODEL_TIMEOUT, THINKING_BUDGET_DEFAULT } from "./constants";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
@@ -312,6 +312,26 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
 
         // Check if models disagree on assertionPassed
         if (claudeResult.assertionPassed !== geminiResult.assertionPassed) {
+          const policy = getConsensusPolicy();
+
+          if (policy === "fail-on-disagreement") {
+            logger.debug(
+              "Models disagree on assertion result; failing per consensusPolicy=fail-on-disagreement.",
+            );
+            const lower = Math.min(
+              claudeResult.confidenceScore,
+              geminiResult.confidenceScore,
+            );
+            return {
+              assertionPassed: false,
+              confidenceScore: Math.round(lower),
+              reasoning:
+                `Assertion failed: models disagreed and consensusPolicy is "fail-on-disagreement".\n` +
+                `Claude (passed=${claudeResult.assertionPassed}, ${claudeResult.confidenceScore}%): ${claudeResult.reasoning}\n` +
+                `Gemini (passed=${geminiResult.assertionPassed}, ${geminiResult.confidenceScore}%): ${geminiResult.reasoning}`,
+            };
+          }
+
           logger.debug("Models disagree on assertion result, consulting arbiter...");
           const arbiterResult = await withTimeout(
             getArbiterDecision(claudeResult, geminiResult),

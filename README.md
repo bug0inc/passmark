@@ -216,13 +216,32 @@ const result = await runUserFlow({
 
 ### `assert(options: AssertionOptions)`
 
-Multi-model consensus assertion. Runs Claude and Gemini in parallel; if they disagree, a third model arbitrates.
+Multi-model consensus assertion. Runs Claude and Gemini in parallel; if they disagree, a third model arbitrates (configurable — see [Consensus Policy](#consensus-policy)).
 
 ```typescript
 const result = await assert({
   page,
   assertion: "The dashboard shows 3 active projects",
   expect,
+});
+```
+
+### Consensus Policy
+
+When the primary (Claude) and secondary (Gemini) assertion models reach the same verdict, the result is used directly. When they **disagree**, you choose how Passmark resolves it:
+
+| Policy | Behavior |
+|---|---|
+| `consult-arbiter-on-disagreement` *(default)* | Calls the arbiter model (Gemini 3.1 Pro) to break the tie. |
+| `fail-on-disagreement` | Treats any disagreement as a failure immediately — no arbiter call. The returned reasoning includes both models' takes so you can inspect what they saw differently. |
+
+Pick `fail-on-disagreement` when you'd rather surface ambiguity/flakiness in the UI under test than let a single model swing the result. Pick the default when you trust the arbiter to make the final call.
+
+```typescript
+configure({
+  assertions: {
+    consensusPolicy: "fail-on-disagreement",
+  },
 });
 ```
 
