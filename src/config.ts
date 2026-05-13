@@ -1,5 +1,5 @@
 import { logger } from "./logger";
-
+import { ConfigurationError } from "./errors";
 import { initTelemetry } from "./instrumentation";
 
 export type EmailProvider = {
@@ -162,8 +162,8 @@ export function configure(config: Config) {
   if (models) {
     const assertionModels = getAssertionModelsList(models);
     if (assertionModels.length < 2) {
-      logger.warn(
-        'Passmark: At least 2 assertion models are recommended for reliable consensus validation.'
+      throw new ConfigurationError(
+        `Passmark: assertion consensus requires at least 2 models, got ${assertionModels.length}.`
       );
     }
   }
@@ -192,10 +192,10 @@ export function getModelId(key: keyof Omit<ModelConfig, 'assertionModels'>): str
 
 /**
  * Returns the list of assertion models from configuration.
- * Prioritizes assertionModels array, falls back to [assertionPrimary, assertionSecondary].
+ * Prioritizes assertionModels array, falls back to [assertionPrimary, assertionSecondary] with defaults.
  *
  * @param models - The model configuration
- * @returns Array of model identifiers for assertions
+ * @returns Array of model identifiers for assertions (always at least 2 when using primary/secondary)
  */
 export function getAssertionModelsList(models?: ModelConfig): string[] {
   const configModels = models ?? getConfig().ai?.models;
@@ -204,26 +204,15 @@ export function getAssertionModelsList(models?: ModelConfig): string[] {
     return [DEFAULT_MODELS.assertionPrimary, DEFAULT_MODELS.assertionSecondary];
   }
   
-  // Prefer the new assertionModels array if provided
-  if (configModels.assertionModels && configModels.assertionModels.length > 0) {
-    return configModels.assertionModels;
+  // Prefer the new assertionModels array if explicitly provided (even if empty)
+  if (configModels.assertionModels !== undefined) {
+    return configModels.assertionModels; // caller will validate length
   }
   
-  // Fall back to primary/secondary for backward compatibility
-  const modelsList: string[] = [];
-  if (configModels.assertionPrimary) {
-    modelsList.push(configModels.assertionPrimary);
-  }
-  if (configModels.assertionSecondary) {
-    modelsList.push(configModels.assertionSecondary);
-  }
-  
-  // If nothing configured, use defaults
-  if (modelsList.length === 0) {
-    return [DEFAULT_MODELS.assertionPrimary, DEFAULT_MODELS.assertionSecondary];
-  }
-  
-  return modelsList;
+  // Backward compatible: build from primary/secondary, applying defaults for unset ones
+  const primary = configModels.assertionPrimary ?? DEFAULT_MODELS.assertionPrimary;
+  const secondary = configModels.assertionSecondary ?? DEFAULT_MODELS.assertionSecondary;
+  return [primary, secondary];
 }
 
 /**
