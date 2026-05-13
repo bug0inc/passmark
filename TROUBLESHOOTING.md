@@ -7,9 +7,10 @@ This guide helps you diagnose and fix the common problems contributors hit when 
 - Node.js >= 18
 - Install dependencies: `pnpm install` (or `npm install`)
 - Install Playwright browsers: `npx playwright install`
-- Redis available at `REDIS_URL` (see `.env.example`)
+- Redis available at `REDIS_URL` or via `configure({ redis: { url } })` (see `.env.example`)
 - Required AI keys set when using direct providers: `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`
 - If using the Vercel AI Gateway, set `AI_GATEWAY_API_KEY`
+- If using CUA mode (`configure({ ai: { mode: "cua" } })`), set `OPENAI_API_KEY` and use `gateway: "none"`
 
 Refer to `.env.example` for the full list of environment variables.
 
@@ -73,7 +74,7 @@ redis-server &
 docker run --rm -p 6379:6379 redis
 ```
 
-Set `REDIS_URL` in your environment (see `.env.example`) so Passmark can connect.
+Set `REDIS_URL` in your environment (see `.env.example`), or pass it via `configure({ redis: { url } })`, so Passmark can connect.
 
 If you intentionally don't want Redis, the code logs a warning and continues without caching.
 
@@ -93,7 +94,16 @@ Fix:
 - Increase timeouts or retry values where appropriate (see `src/constants.ts`).
 - Make sure your network to the AI provider is reliable and your API quota isn't exhausted.
 
-### 7) Enable debug logs
+### 7) CUA mode errors
+
+`mode: "cua"` calls OpenAI's Responses API directly with the built-in `computer` tool.
+
+- **"CUA mode requires gateway: 'none'"** — CUA doesn't work through Vercel / OpenRouter / Cloudflare gateways (the Responses-API `computer` tool is only available on direct OpenAI access). Use `configure({ ai: { mode: "cua", gateway: "none" } })`.
+- **"OPENAI_API_KEY isn't set"** — add `OPENAI_API_KEY` to your environment / `.env`.
+- **Generic 400 with `param: null` in the error body** — your OpenAI API key likely doesn't have access to the CUA model or the built-in `computer` tool on the Responses API. Verify access at https://platform.openai.com/settings/organization/limits.
+- **"Tool 'computer_use_preview' is not supported with gpt-5.5"** — you're on an old build. In the current API, `gpt-5.5` uses the new simpler tool shape `{ type: "computer" }`, not the legacy `computer_use_preview`. Rebuild from `main`.
+
+### 8) Enable debug logs
 
 Set the `PASSMARK_LOG_LEVEL` environment variable to `debug` to get more information from the logger:
 

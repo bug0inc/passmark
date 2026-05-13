@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Disable Axiom instrumentation
-vi.mock("../instrumentation", () => ({ axiomEnabled: false }));
+vi.mock("../instrumentation", () => ({
+  isAxiomEnabled: () => false,
+  initTelemetry: vi.fn(),
+}));
 
 // Mock models.resolveModel to return the model id string so our AI mock can
 // branch based on the model identifier.
@@ -29,6 +32,7 @@ vi.mock("ai", async (importOriginal) => {
 vi.mock("../utils", () => ({
   safeSnapshot: vi.fn().mockResolvedValue("snapshot content"),
   withTimeout: vi.fn((p: Promise<unknown>) => p),
+  resolvePage: vi.fn((input: unknown) => input),
 }));
 
 import { assert } from "../assertion";

@@ -4,7 +4,7 @@ import { getConfig } from "./config";
 import { extractEmailContent } from "./email";
 import { GLOBAL_VALUES_TTL_SECONDS } from "./constants";
 import { logger } from "./logger";
-import { redis } from "./redis";
+import { getRedis } from "./redis";
 import { Step } from "./types";
 import { generatePhoneNumber } from "./utils";
 
@@ -47,6 +47,12 @@ export type AssertionItem = {
   assertion: string;
   effort?: "low" | "high";
   images?: string[];
+  /**
+   * When true, `runSteps` records a video while executing the surrounding
+   * steps and passes it to the assertion for evaluation. Useful for
+   * ephemeral UI like toasts that a screenshot may miss.
+   */
+  video?: boolean;
 };
 
 export type ProcessPlaceholdersResult = {
@@ -112,6 +118,7 @@ function getRedisKey(executionId: string): string {
 export async function getGlobalValues(
   executionId: string,
 ): Promise<Partial<GlobalPlaceholders> | null> {
+  const redis = getRedis();
   if (!redis) return null;
   const key = getRedisKey(executionId);
   const values = await redis.hgetall(key);
@@ -131,6 +138,7 @@ export async function saveGlobalValues(
   executionId: string,
   values: GlobalPlaceholders,
 ): Promise<void> {
+  const redis = getRedis();
   if (!redis) return;
 
   const key = getRedisKey(executionId);
@@ -160,6 +168,7 @@ function getProjectDataRedisKey(projectId: string): string {
  * Returns an empty object if no data exists.
  */
 export async function getProjectData(projectId: string): Promise<ProjectDataPlaceholders> {
+  const redis = getRedis();
   if (!redis) return {};
   const key = getProjectDataRedisKey(projectId);
   const values = await redis.hgetall(key);

@@ -8,6 +8,7 @@ import {
   PlaywrightWorkerOptions,
   TestType,
 } from "@playwright/test";
+import type { AIOverride } from "./config";
 import type { TabManager } from "./utils/tab-manager";
 
 export type PageInput = Page | TabManager;
@@ -32,6 +33,11 @@ export type UserFlowOptions = {
     password: string;
   };
   model?: LanguageModel;
+  /**
+   * Override the AI mode/gateway/models for this user-flow run only.
+   * Falls back to the global `configure()` values when omitted.
+   */
+  ai?: AIOverride;
 };
 
 /**
@@ -57,6 +63,12 @@ export type Step = {
   extract?: ExtractionConfig;
   /** Switch the active page before this step runs. 'main' = original tab, 'latest' = most recently opened, or numeric index. */
   switchToTab?: "main" | "latest" | number;
+  /**
+   * Override the AI mode/gateway/models for just this step. Lets you mix
+   * snapshot and CUA steps in the same `runSteps` call. Beats both the
+   * `runSteps` call-level `ai` and the global `configure()` value.
+   */
+  ai?: AIOverride;
 };
 
 export type AssertionOptions = {
@@ -70,6 +82,21 @@ export type AssertionOptions = {
   expect: Expect<{}>;
   effort?: "low" | "high";
   images?: string[];
+  maxRetries?: number;
+  onRetry?: (retryCount: number, previousResult: AssertionResult) => void;
+  /**
+   * When true, `runSteps` records a video across the step run and feeds it
+   * to a video-capable Gemini model for assertion. Useful for ephemeral UI
+   * (toasts, banners) that a single screenshot may miss. Standalone `assert`
+   * callers can also pass `videoFilePath` directly.
+   */
+  video?: boolean;
+  /**
+   * Absolute path to a pre-recorded video file (.webm/.mp4) for the
+   * assertion to evaluate. Set by `runSteps` when `video: true`; can also be
+   * supplied by callers who record their own video.
+   */
+  videoFilePath?: string;
 };
 
 export type WaitConditionResult = {
@@ -114,6 +141,12 @@ export type RunStepsOptions = {
    * Required when using {{global.*}} placeholders.
    */
   executionId?: string;
+  /**
+   * Default AI override applied to every step in this call. Individual
+   * `step.ai` overrides take precedence over this; this takes precedence
+   * over the global `configure()` value.
+   */
+  ai?: AIOverride;
 } & (
     | {
       assertions: Omit<AssertionOptions, "page" | "test" | "expect">[];
