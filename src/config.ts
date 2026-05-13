@@ -1,3 +1,5 @@
+import { logger } from "./logger";
+import { ConfigurationError } from "./errors";
 import { initTelemetry } from "./instrumentation";
 
 export type EmailProvider = {
@@ -32,6 +34,8 @@ export type ModelConfig = {
   assertionPrimary?: string;
   /** Model for assertions (secondary). Default: google/gemini-3-flash */
   assertionSecondary?: string;
+  /** Array of models to use for consensus assertions. When provided, overrides assertionPrimary/assertionSecondary */
+  assertionModels?: string[];
   /** Model for assertion arbiter. Default: google/gemini-3.1-pro-preview */
   assertionArbiter?: string;
   /** Model for data extraction, wait conditions, and lightweight tasks. Default: google/gemini-2.5-flash */
@@ -44,12 +48,13 @@ export type ModelConfig = {
   cua?: string;
 };
 
-export const DEFAULT_MODELS: Required<ModelConfig> = {
+export const DEFAULT_MODELS: Required<Omit<ModelConfig, 'assertionModels'>> & Pick<ModelConfig, 'assertionModels'> = {
   stepExecution: "google/gemini-3-flash",
   userFlowLow: "google/gemini-3-flash",
   userFlowHigh: "google/gemini-3.1-pro-preview",
   assertionPrimary: "anthropic/claude-haiku-4.5",
   assertionSecondary: "google/gemini-3-flash",
+  assertionModels: undefined,
   assertionArbiter: "google/gemini-3.1-pro-preview",
   utility: "google/gemini-2.5-flash",
   cua: "gpt-5.5",
@@ -116,9 +121,30 @@ let globalConfig: Config = {};
  *
  * @example
  * ```typescript
+ * // Using primary/secondary models (backward compatible)
  * configure({
- *   ai: { gateway: "none", models: { stepExecution: "google/gemini-3-flash" } },
- *   email: { domain: "test.com", extractContent: async ({ email, prompt }) => "..." },
+ *   ai: { 
+ *     gateway: "none", 
+ *     models: { 
+ *       assertionPrimary: "anthropic/claude-haiku-4.5",
+ *       assertionSecondary: "google/gemini-3-flash"
+ *     } 
+ *   },
+ * });
+ * 
+ * // Using multiple models array (new flexible approach)
+ * configure({
+ *   ai: { 
+ *     gateway: "openrouter", 
+ *     models: { 
+ *       assertionModels: [
+ *         "anthropic/claude-haiku-4.5",
+ *         "google/gemini-3-flash",
+ *         "meta-llama/llama-3.1-8b-instruct"
+ *       ],
+ *       assertionArbiter: "google/gemini-3.1-pro-preview"
+ *     } 
+ *   },
  * });
  * ```
  */
@@ -130,6 +156,17 @@ export function configure(config: Config) {
     );
   }
   globalConfig = { ...globalConfig, ...config };
+  
+  // Validate assertion model configuration
+  const models = globalConfig.ai?.models;
+  if (models) {
+    const assertionModels = getAssertionModelsList(models);
+    if (assertionModels.length < 2) {
+      throw new ConfigurationError(
+        `Passmark: assertion consensus requires at least 2 models, got ${assertionModels.length}.`
+      );
+    }
+  }
 
   if (config.telemetry) {
     initTelemetry();
@@ -149,8 +186,33 @@ export function getConfig(): Config {
  * @param key - The model use case key (e.g. "stepExecution", "utility")
  * @returns The model identifier string (e.g. "google/gemini-3-flash")
  */
-export function getModelId(key: keyof ModelConfig): string {
+export function getModelId(key: keyof Omit<ModelConfig, 'assertionModels'>): string {
   return getConfig().ai?.models?.[key] ?? DEFAULT_MODELS[key];
+}
+
+/**
+ * Returns the list of assertion models from configuration.
+ * Prioritizes assertionModels array, falls back to [assertionPrimary, assertionSecondary] with defaults.
+ *
+ * @param models - The model configuration
+ * @returns Array of model identifiers for assertions (always at least 2 when using primary/secondary)
+ */
+export function getAssertionModelsList(models?: ModelConfig): string[] {
+  const configModels = models ?? getConfig().ai?.models;
+  
+  if (!configModels) {
+    return [DEFAULT_MODELS.assertionPrimary, DEFAULT_MODELS.assertionSecondary];
+  }
+  
+  // Prefer the new assertionModels array if explicitly provided (even if empty)
+  if (configModels.assertionModels !== undefined) {
+    return configModels.assertionModels; // caller will validate length
+  }
+  
+  // Backward compatible: build from primary/secondary, applying defaults for unset ones
+  const primary = configModels.assertionPrimary ?? DEFAULT_MODELS.assertionPrimary;
+  const secondary = configModels.assertionSecondary ?? DEFAULT_MODELS.assertionSecondary;
+  return [primary, secondary];
 }
 
 /**
