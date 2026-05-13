@@ -4,7 +4,7 @@ import { Locator, type Page } from "@playwright/test";
 import { wrapTool } from "axiom/ai";
 import shortid from "shortid";
 import { getConfig } from "./config";
-import { axiomEnabled } from "./instrumentation";
+import { isAxiomEnabled } from "./instrumentation";
 import { logger } from "./logger";
 import { LOCATOR_ACTION_TIMEOUT, SNAPSHOT_TIMEOUT, STOP_DELAY } from "./constants";
 import {
@@ -30,11 +30,15 @@ type ToolSettings = {
   tabManager?: TabManager;
 };
 
-// Only wrap tools with Axiom instrumentation when Axiom is configured
-const maybeWrapTool: typeof wrapTool = axiomEnabled ? wrapTool : <T>(_name: string, t: T): T => t;
-
 export function getAItools(page: Page, settings?: ToolSettings) {
   const playwrightTools = new PlaywrightTools(page, settings);
+
+  // Only wrap tools with Axiom instrumentation when Axiom is configured.
+  // Resolved per-call so users who call `configure({ telemetry })` before
+  // `runSteps` (rather than setting env vars) still get instrumentation.
+  const maybeWrapTool: typeof wrapTool = isAxiomEnabled()
+    ? wrapTool
+    : <T>(_name: string, t: T): T => t;
 
   const withSnapshot = async <TArgs, TResult>(
     fn: (args: TArgs) => Promise<TResult>,
@@ -476,13 +480,9 @@ class PlaywrightTools {
     reasoning: z.string().describe("A quick one-line reasoning behind this action"),
   });
   public async stop(_: z.infer<typeof this.stopSchema>) {
-    const DELAY = STOP_DELAY; // 3 seconds
     // brief sleep to ensure any ongoing navigation or actions are complete
-    // In future we could add graceful stop logic here
-    await new Promise((resolve) => setTimeout(resolve, DELAY));
-    if (this.abortController) {
-      this.abortController.abort();
-    }
+    // before the agent loop terminates via the `hasToolCall("browser_stop")` stop condition
+    await new Promise((resolve) => setTimeout(resolve, STOP_DELAY));
     return { success: true, message: "Execution stopped" };
   }
 
