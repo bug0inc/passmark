@@ -280,12 +280,12 @@ configure({
 | `REDIS_URL` | No | - | Redis connection URL for step caching and global state. Can also be set via `configure({ redis: { url } })`, which takes precedence. |
 | `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude models |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models. Also required for `video: true` assertions regardless of gateway (file URIs are tied to the uploading account). |
+| `OPENAI_API_KEY` | No | - | OpenAI API key for OpenAI models (required for CUA mode; must have Responses-API `computer` tool access) |
 | `AI_GATEWAY_API_KEY` | If gateway=vercel | - | Vercel AI Gateway API key |
 | `OPENROUTER_API_KEY` | If gateway=openrouter | - | OpenRouter API key |
 | `CLOUDFLARE_ACCOUNT_ID` | If gateway=cloudflare | - | Cloudflare account ID that owns the AI Gateway |
 | `CLOUDFLARE_AI_GATEWAY` | If gateway=cloudflare | - | Cloudflare AI Gateway name (slug) |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | If gateway=cloudflare and the gateway is authenticated | - | Cloudflare AI Gateway token (sent as `cf-aig-authorization`) |
-| `OPENAI_API_KEY` | If mode=cua | - | OpenAI API key (required for CUA mode; must have Responses-API `computer` tool access) |
 | `AXIOM_TOKEN` | No | - | Axiom token for OpenTelemetry tracing. Can also be set via `configure({ telemetry: { axiomToken } })`, which takes precedence. |
 | `AXIOM_DATASET` | No | - | Axiom dataset for trace storage. Can also be set via `configure({ telemetry: { axiomDataset } })`, which takes precedence. |
 | `PASSMARK_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
