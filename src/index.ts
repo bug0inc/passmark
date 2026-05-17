@@ -471,6 +471,7 @@ export const runSteps = async ({
       abortController,
       test,
       tabManager,
+      deltaSnapshot: step.deltaSnapshot ?? false,
     });
 
     logger.debug(`Executing Step: ${step.description}`);

@@ -69,6 +69,21 @@ export type Step = {
    * `runSteps` call-level `ai` and the global `configure()` value.
    */
   ai?: AIOverride;
+
+  /**
+   * When true, post-action snapshots only include DOM nodes that changed
+   * since the last snapshot, instead of the full page tree.
+   *
+   * Use this on steps that interact with complex, data-dense pages
+   * (large tables, dashboards, CRM grids) where the full ariaSnapshot
+   * can exceed hundreds of thousands of tokens per tool call.
+   *
+   * The first snapshot of the step is always full — subsequent snapshots
+   * within the same step are diffed against it.
+   *
+   * @default false
+   */
+  deltaSnapshot?: boolean;
 };
 
 export type AssertionOptions = {

@@ -7,6 +7,7 @@ import { getConfig } from "./config";
 import { isAxiomEnabled } from "./instrumentation";
 import { logger } from "./logger";
 import { LOCATOR_ACTION_TIMEOUT, SNAPSHOT_TIMEOUT, STOP_DELAY } from "./constants";
+import { computeSnapshotDiff } from "./utils/snapshot-diff";
 import {
   PlaywrightTestArgs,
   PlaywrightTestOptions,
@@ -28,6 +29,11 @@ type ToolSettings = {
    * dynamically and auto-switch to a newly opened tab after action tools.
    */
   tabManager?: TabManager;
+  /**
+   * When true, post-action snapshots return only lines that changed since
+   * the last snapshot. The first snapshot of the step is always full.
+   */
+  deltaSnapshot?: boolean;
 };
 
 export function getAItools(page: Page, settings?: ToolSettings) {
@@ -260,6 +266,8 @@ class PlaywrightTools {
   private tabManager?: TabManager;
   private currentStep;
   private abortController?: AbortController;
+  private deltaSnapshotEnabled: boolean;
+  private lastSnapshot: string | null = null;
   public pendingCacheData: Record<string, string> | null = null;
 
   private get page(): Page {
@@ -267,17 +275,36 @@ class PlaywrightTools {
   }
 
   constructor(page: Page, settings: ToolSettings = {}) {
-    const { currentStep, abortController, tabManager } = settings;
+    const { currentStep, abortController, tabManager, deltaSnapshot } = settings;
 
     this.initialPage = page;
     this.tabManager = tabManager;
     this.currentStep = currentStep;
     this.abortController = abortController;
+    this.deltaSnapshotEnabled = deltaSnapshot ?? false;
   }
 
   public async getSnapshot() {
-    const snapshot = await this.page.ariaSnapshot({ mode: "ai", timeout: SNAPSHOT_TIMEOUT });
-    return `url: ${this.page.url()}\n\n${snapshot}`;
+    const raw = await this.page.ariaSnapshot({ mode: "ai", timeout: SNAPSHOT_TIMEOUT });
+    const full = `url: ${this.page.url()}\n\n${raw}`;
+
+    if (!this.deltaSnapshotEnabled || this.lastSnapshot === null) {
+      this.lastSnapshot = full;
+      return full;
+    }
+
+    const { diff, isFull, savedChars } = computeSnapshotDiff(this.lastSnapshot, full);
+    this.lastSnapshot = full;
+
+    if (isFull) {
+      logger.debug("Delta snapshot: change ratio too high, returning full snapshot");
+      return full;
+    }
+
+    logger.debug(
+      `Delta snapshot: -${savedChars.toLocaleString()} chars saved on step "${this.currentStep?.description}"`,
+    );
+    return diff;
   }
 
   public navigateSchema = z.object({
@@ -291,6 +318,7 @@ class PlaywrightTools {
   });
   public async navigate({ url }: z.infer<typeof this.navigateSchema>) {
     await this.page.goto(url, { waitUntil: "load" });
+    this.lastSnapshot = null;
     return { success: true, url };
   }
 
@@ -392,16 +420,19 @@ class PlaywrightTools {
 
   public async goBack() {
     await this.page.goBack();
+    this.lastSnapshot = null;
     return { success: true };
   }
 
   public async goForward() {
     await this.page.goForward();
+    this.lastSnapshot = null;
     return { success: true };
   }
 
   public async reload() {
     await this.page.reload({ waitUntil: "load" });
+    this.lastSnapshot = null;
     return { success: true };
   }
 
