@@ -537,6 +537,14 @@ export const runSteps = async ({
           }),
       );
 
+      // Log token usage for the step
+      logger.info(
+        `[token usage] step: "${step.description}" | ` +
+        `prompt: ${result.usage.inputTokens} | ` +
+        `completion: ${result.usage.outputTokens} | ` +
+        `total: ${result.usage.totalTokens}`
+      );
+
       // Cache the step action only if it was a single tool call (simple, deterministic action).
       // Multi-step actions are not cached as they may be non-deterministic.
       const allToolCalls = result.steps
