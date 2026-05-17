@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Locator, type Page } from "@playwright/test";
 import { wrapTool } from "axiom/ai";
 import shortid from "shortid";
-import { getConfig } from "./config";
+import { getConfig, getDeltaSnapshotEnabled } from "./config";
 import { isAxiomEnabled } from "./instrumentation";
 import { logger } from "./logger";
 import { LOCATOR_ACTION_TIMEOUT, SNAPSHOT_TIMEOUT, STOP_DELAY } from "./constants";
@@ -29,11 +29,6 @@ type ToolSettings = {
    * dynamically and auto-switch to a newly opened tab after action tools.
    */
   tabManager?: TabManager;
-  /**
-   * When true, post-action snapshots return only lines that changed since
-   * the last snapshot. The first snapshot of the step is always full.
-   */
-  deltaSnapshot?: boolean;
 };
 
 export function getAItools(page: Page, settings?: ToolSettings) {
@@ -275,13 +270,13 @@ class PlaywrightTools {
   }
 
   constructor(page: Page, settings: ToolSettings = {}) {
-    const { currentStep, abortController, tabManager, deltaSnapshot } = settings;
+    const { currentStep, abortController, tabManager } = settings;
 
     this.initialPage = page;
     this.tabManager = tabManager;
     this.currentStep = currentStep;
     this.abortController = abortController;
-    this.deltaSnapshotEnabled = deltaSnapshot ?? false;
+    this.deltaSnapshotEnabled = getDeltaSnapshotEnabled();
   }
 
   public async getSnapshot() {

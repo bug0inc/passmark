@@ -104,6 +104,21 @@ type Config = {
    * after the assertions consume them.
    */
   videoDir?: string;
+  /**
+   * When true (default), post-action snapshots within a single step only
+   * include DOM nodes that changed since the last snapshot, dramatically
+   * reducing token usage on complex pages (large tables, dashboards, grids).
+   *
+   * The first snapshot of each step is always full so the agent has complete
+   * orientation. Subsequent snapshots are diffed. A built-in savings
+   * threshold falls back to a full snapshot if the diff would not save
+   * enough — delta mode is never worse than full mode.
+   *
+   * Set to `false` to disable globally and always return full snapshots.
+   *
+   * @default true
+   */
+  deltaSnapshot?: boolean;
 };
 
 let globalConfig: Config = {};
@@ -159,6 +174,14 @@ export function getModelId(key: keyof ModelConfig): string {
  */
 export function getMode(): AIMode {
   return getConfig().ai?.mode ?? "snapshot";
+}
+
+/**
+ * Returns whether delta snapshots are enabled. Defaults to `true` — every
+ * snapshot after the first within a step returns only the diff.
+ */
+export function getDeltaSnapshotEnabled(): boolean {
+  return getConfig().deltaSnapshot ?? true;
 }
 
 /**

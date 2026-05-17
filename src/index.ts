@@ -471,7 +471,6 @@ export const runSteps = async ({
       abortController,
       test,
       tabManager,
-      deltaSnapshot: step.deltaSnapshot ?? false,
     });
 
     logger.debug(`Executing Step: ${step.description}`);
@@ -536,6 +535,14 @@ export const runSteps = async ({
               stepIndex: i,
             }),
           }),
+      );
+
+      // Log token usage for the step
+      logger.info(
+        `[token usage] step: "${step.description}" | ` +
+        `prompt: ${result.usage.inputTokens} | ` +
+        `completion: ${result.usage.outputTokens} | ` +
+        `total: ${result.usage.totalTokens}`
       );
 
       // Cache the step action only if it was a single tool call (simple, deterministic action).
@@ -661,7 +668,7 @@ export const runSteps = async ({
           images,
           failSilently: failAssertionsSilently,
           maxRetries: 1,
-          onRetry: (retryCount, previousResult) => {},
+          onRetry: (retryCount, previousResult) => { },
           video: video && Boolean(videoRecorder),
           videoFilePath: videoRecorder?.filePath,
         });
