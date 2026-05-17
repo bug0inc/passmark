@@ -668,7 +668,7 @@ export const runSteps = async ({
           images,
           failSilently: failAssertionsSilently,
           maxRetries: 1,
-          onRetry: (retryCount, previousResult) => { },
+          onRetry: (retryCount, previousResult) => {},
           video: video && Boolean(videoRecorder),
           videoFilePath: videoRecorder?.filePath,
         });
