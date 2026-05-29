@@ -3,10 +3,11 @@ import { z } from "zod";
 import { Locator, type Page } from "@playwright/test";
 import { wrapTool } from "axiom/ai";
 import shortid from "shortid";
-import { getConfig } from "./config";
+import { getConfig, getDeltaSnapshotEnabled } from "./config";
 import { isAxiomEnabled } from "./instrumentation";
 import { logger } from "./logger";
 import { LOCATOR_ACTION_TIMEOUT, SNAPSHOT_TIMEOUT, STOP_DELAY } from "./constants";
+import { computeSnapshotDiff } from "./utils/snapshot-diff";
 import {
   PlaywrightTestArgs,
   PlaywrightTestOptions,
@@ -260,6 +261,8 @@ class PlaywrightTools {
   private tabManager?: TabManager;
   private currentStep;
   private abortController?: AbortController;
+  private deltaSnapshotEnabled: boolean;
+  private lastSnapshot: string | null = null;
   public pendingCacheData: Record<string, string> | null = null;
 
   private get page(): Page {
@@ -273,11 +276,30 @@ class PlaywrightTools {
     this.tabManager = tabManager;
     this.currentStep = currentStep;
     this.abortController = abortController;
+    this.deltaSnapshotEnabled = getDeltaSnapshotEnabled();
   }
 
   public async getSnapshot() {
-    const snapshot = await this.page.ariaSnapshot({ mode: "ai", timeout: SNAPSHOT_TIMEOUT });
-    return `url: ${this.page.url()}\n\n${snapshot}`;
+    const raw = await this.page.ariaSnapshot({ mode: "ai", timeout: SNAPSHOT_TIMEOUT });
+    const full = `url: ${this.page.url()}\n\n${raw}`;
+
+    if (!this.deltaSnapshotEnabled || this.lastSnapshot === null) {
+      this.lastSnapshot = full;
+      return full;
+    }
+
+    const { diff, isFull, savedChars } = computeSnapshotDiff(this.lastSnapshot, full);
+    this.lastSnapshot = full;
+
+    if (isFull) {
+      logger.debug("Delta snapshot: change ratio too high, returning full snapshot");
+      return full;
+    }
+
+    logger.debug(
+      `Delta snapshot: -${savedChars.toLocaleString()} chars saved on step "${this.currentStep?.description}"`,
+    );
+    return diff;
   }
 
   public navigateSchema = z.object({
@@ -291,6 +313,7 @@ class PlaywrightTools {
   });
   public async navigate({ url }: z.infer<typeof this.navigateSchema>) {
     await this.page.goto(url, { waitUntil: "load" });
+    this.lastSnapshot = null;
     return { success: true, url };
   }
 
@@ -392,16 +415,19 @@ class PlaywrightTools {
 
   public async goBack() {
     await this.page.goBack();
+    this.lastSnapshot = null;
     return { success: true };
   }
 
   public async goForward() {
     await this.page.goForward();
+    this.lastSnapshot = null;
     return { success: true };
   }
 
   public async reload() {
     await this.page.reload({ waitUntil: "load" });
+    this.lastSnapshot = null;
     return { success: true };
   }
 
