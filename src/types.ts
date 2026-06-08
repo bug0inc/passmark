@@ -19,6 +19,12 @@ export type AssertionResult = {
   reasoning: string; // Brief explanation of the reasoning behind the assertion
 };
 
+export type AuthConfig = {
+  email: string;
+  password: string;
+  callbackUrl?: string;
+};
+
 export type UserFlowOptions = {
   page: Page;
   userFlow: string;
@@ -28,11 +34,7 @@ export type UserFlowOptions = {
   assertion?: string;
   effort?: "low" | "high";
   thinkingBudget?: number; // in tokens, default 1024
-  auth?: {
-    email: string;
-    password: string;
-    callbackUrl: string;
-  };
+  auth?: AuthConfig;
   model?: LanguageModel;
   /**
    * Override the AI mode/gateway/models for this user-flow run only.
@@ -137,7 +139,7 @@ export type RunStepsOptions = {
   // optional fields
   bypassCache?: boolean;
   failAssertionsSilently?: boolean;
-  auth?: { email: string; password: string; callbackUrl: string };
+  auth?: AuthConfig;
   onStepStart?: (step: { id: string; description: string }) => void;
   onStepEnd?: (step: { id: string; description: string }) => void;
   onReasoning?: (step: { id: string; reasoning: string }) => void;
