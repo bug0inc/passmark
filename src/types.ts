@@ -156,9 +156,9 @@ export type RunStepsOptions = {
    */
   ai?: AIOverride;
 } & (
-  | {
+    | {
       assertions: Omit<AssertionOptions, "page" | "test" | "expect">[];
       expect: Expect<{}>;
     }
-  | { assertions?: never; expect?: never }
-);
+    | { assertions?: never; expect?: never }
+  );
