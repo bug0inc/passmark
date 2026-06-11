@@ -10,11 +10,13 @@ vi.mock("../email", () => ({
 
 import { resetConfig, configure } from "../config";
 import {
+  computeDynamicEmailPreference,
   containsGlobalPlaceholder,
   stepsContainGlobalPlaceholders,
   replacePlaceholders,
   generateLocalValues,
   getDynamicEmail,
+  processPlaceholders,
   LocalPlaceholders,
   GlobalPlaceholders,
 } from "../data-cache";
@@ -152,21 +154,119 @@ describe("generateLocalValues", () => {
   });
 });
 
+// ─── computeDynamicEmailPreference ──────────────────────────────────────────
+
+describe("computeDynamicEmailPreference", () => {
+  it('returns "global" when steps reference {{global.dynamicEmail}}', () => {
+    const steps = [{ description: "Fill email", data: { value: "{{global.dynamicEmail}}" } }];
+    expect(computeDynamicEmailPreference(steps)).toBe("global");
+  });
+
+  it('returns "run" when steps only reference {{run.dynamicEmail}}', () => {
+    const steps = [
+      { description: "Fill email", data: { value: "{{run.dynamicEmail}}" } },
+      { description: "Fill OTP", data: { value: "{{email.otp:get the OTP}}" } },
+    ];
+    expect(computeDynamicEmailPreference(steps)).toBe("run");
+  });
+
+  it('returns "global" when both run and global dynamicEmail are referenced', () => {
+    const steps = [
+      { description: "Fill email", data: { value: "{{global.dynamicEmail}}" } },
+      { description: "Backup", data: { value: "{{run.dynamicEmail}}" } },
+    ];
+    expect(computeDynamicEmailPreference(steps)).toBe("global");
+  });
+
+  it('returns "auto" when no dynamicEmail placeholder is referenced', () => {
+    const steps = [
+      { description: "Fill OTP", data: { value: "{{email.otp:get the OTP}}" } },
+      { description: "Enter name", data: { value: "{{run.fullName}}" } },
+    ];
+    expect(computeDynamicEmailPreference(steps)).toBe("auto");
+  });
+
+  it('returns "global" when assertions reference {{global.dynamicEmail}}', () => {
+    const steps = [{ description: "Submit form" }];
+    const assertions = [{ assertion: "Email sent to {{global.dynamicEmail}}" }];
+    expect(computeDynamicEmailPreference(steps, assertions)).toBe("global");
+  });
+});
+
 // ─── getDynamicEmail ────────────────────────────────────────────────────────
 
 describe("getDynamicEmail", () => {
-  it("prefers global dynamicEmail over local", () => {
-    const globalValues: GlobalPlaceholders = {
-      "{{global.shortid}}": "g1",
-      "{{global.fullName}}": "Global User",
-      "{{global.email}}": "g@test.com",
-      "{{global.dynamicEmail}}": "global-dyn@test.com",
-      "{{global.phoneNumber}}": "0000000000",
-    };
-    expect(getDynamicEmail(localValues, globalValues)).toBe("global-dyn@test.com");
+  const globalValues: GlobalPlaceholders = {
+    "{{global.shortid}}": "g1",
+    "{{global.fullName}}": "Global User",
+    "{{global.email}}": "g@test.com",
+    "{{global.dynamicEmail}}": "global-dyn@test.com",
+    "{{global.phoneNumber}}": "0000000000",
+  };
+
+  it('uses run inbox when preference is "run" even if global is present', () => {
+    expect(getDynamicEmail(localValues, globalValues, "run")).toBe("dyn@test.com");
+  });
+
+  it('uses global inbox when preference is "global"', () => {
+    expect(getDynamicEmail(localValues, globalValues, "global")).toBe("global-dyn@test.com");
+  });
+
+  it('prefers global dynamicEmail over local when preference is "auto"', () => {
+    expect(getDynamicEmail(localValues, globalValues, "auto")).toBe("global-dyn@test.com");
   });
 
   it("falls back to local dynamicEmail when global is not provided", () => {
     expect(getDynamicEmail(localValues)).toBe("dyn@test.com");
+  });
+});
+
+// ─── processPlaceholders ────────────────────────────────────────────────────
+
+describe("processPlaceholders dynamicEmailPreference", () => {
+  beforeEach(() => {
+    configure({ email: { domain: "test.com", extractContent: vi.fn() } });
+  });
+
+  it('sets dynamicEmailPreference to "run" for run-only step sets with executionId', async () => {
+    const result = await processPlaceholders(
+      [
+        { description: "Fill email", data: { value: "{{run.dynamicEmail}}" } },
+        { description: "Fill OTP", data: { value: "{{email.otp:get the OTP}}" } },
+      ],
+      undefined,
+      "exec-1",
+    );
+
+    expect(result.dynamicEmailPreference).toBe("run");
+    expect(getDynamicEmail(result.localValues, result.globalValues, result.dynamicEmailPreference)).toBe(
+      result.localValues["{{run.dynamicEmail}}"],
+    );
+    expect(
+      getDynamicEmail(result.localValues, result.globalValues, result.dynamicEmailPreference),
+    ).not.toBe(result.globalValues?.["{{global.dynamicEmail}}"]);
+  });
+
+  it('sets dynamicEmailPreference to "global" when steps reference {{global.dynamicEmail}}', async () => {
+    const result = await processPlaceholders(
+      [{ description: "Fill email", data: { value: "{{global.dynamicEmail}}" } }],
+      undefined,
+      "exec-1",
+    );
+
+    expect(result.dynamicEmailPreference).toBe("global");
+  });
+
+  it('sets dynamicEmailPreference to "auto" when no dynamicEmail placeholder is referenced', async () => {
+    const result = await processPlaceholders(
+      [{ description: "Fill OTP", data: { value: "{{email.otp:get the OTP}}" } }],
+      undefined,
+      "exec-1",
+    );
+
+    expect(result.dynamicEmailPreference).toBe("auto");
+    expect(getDynamicEmail(result.localValues, result.globalValues, result.dynamicEmailPreference)).toBe(
+      result.globalValues?.["{{global.dynamicEmail}}"],
+    );
   });
 });

@@ -61,12 +61,15 @@ export type AssertionItem = {
   video?: boolean;
 };
 
+export type DynamicEmailPreference = "run" | "global" | "auto";
+
 export type ProcessPlaceholdersResult = {
   processedSteps: Step[];
   processedAssertions?: AssertionItem[];
   localValues: LocalPlaceholders;
   globalValues?: GlobalPlaceholders;
   projectDataValues?: ProjectDataPlaceholders;
+  dynamicEmailPreference: DynamicEmailPreference;
 };
 
 // =============================================================================
@@ -296,6 +299,95 @@ export function assertionsContainGlobalPlaceholders(assertions?: { assertion: st
 }
 
 /**
+ * Checks if text contains a specific placeholder string.
+ */
+export function containsPlaceholder(text: string, placeholder: string): boolean {
+  return text.includes(placeholder);
+}
+
+/**
+ * Scans steps for a specific placeholder string.
+ */
+export function stepsContainPlaceholder(
+  steps: {
+    description: string;
+    data?: Record<string, string>;
+    script?: string;
+    waitUntil?: string;
+  }[],
+  placeholder: string,
+): boolean {
+  for (const step of steps) {
+    if (containsPlaceholder(step.description, placeholder)) {
+      return true;
+    }
+
+    if (step.data) {
+      for (const value of Object.values(step.data)) {
+        if (containsPlaceholder(value, placeholder)) {
+          return true;
+        }
+      }
+    }
+
+    if (step.script && containsPlaceholder(step.script, placeholder)) {
+      return true;
+    }
+
+    if (step.waitUntil && containsPlaceholder(step.waitUntil, placeholder)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Scans assertions for a specific placeholder string.
+ */
+export function assertionsContainPlaceholder(
+  assertions: { assertion: string }[] | undefined,
+  placeholder: string,
+): boolean {
+  if (!assertions) return false;
+
+  for (const item of assertions) {
+    if (containsPlaceholder(item.assertion, placeholder)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Determines which dynamic email inbox {{email.extract(...)}} should query
+ * based on which dynamicEmail placeholder the step set references.
+ */
+export function computeDynamicEmailPreference(
+  steps: Step[],
+  assertions?: AssertionItem[],
+): DynamicEmailPreference {
+  const referencesGlobalDynamicEmail =
+    stepsContainPlaceholder(steps, "{{global.dynamicEmail}}") ||
+    assertionsContainPlaceholder(assertions, "{{global.dynamicEmail}}");
+
+  const referencesRunDynamicEmail =
+    stepsContainPlaceholder(steps, "{{run.dynamicEmail}}") ||
+    assertionsContainPlaceholder(assertions, "{{run.dynamicEmail}}");
+
+  if (referencesGlobalDynamicEmail) {
+    return "global";
+  }
+
+  if (referencesRunDynamicEmail) {
+    return "run";
+  }
+
+  return "auto";
+}
+
+/**
  * Checks if any text contains project data placeholders.
  */
 export function containsProjectDataPlaceholder(text: string): boolean {
@@ -441,6 +533,8 @@ export async function processPlaceholders(
     );
   }
 
+  const dynamicEmailPreference = computeDynamicEmailPreference(steps, assertions);
+
   // Generate fresh run values (always new per runSteps call)
   const localValues = await generateLocalValues();
 
@@ -527,18 +621,30 @@ export async function processPlaceholders(
     localValues,
     globalValues,
     projectDataValues,
+    dynamicEmailPreference,
   };
 }
 
 /**
  * Gets the dynamic email to use for email extraction.
- * Prefers global email if available, otherwise falls back to local email.
+ * When preference is "run", always uses the run-scoped inbox.
+ * When preference is "global", prefers the shared execution inbox.
+ * When preference is "auto" (no dynamicEmail placeholder referenced), prefers global if available.
  */
 export function getDynamicEmail(
   localValues: LocalPlaceholders,
   globalValues?: GlobalPlaceholders,
+  preference: DynamicEmailPreference = "auto",
 ): string {
-  return globalValues?.["{{global.dynamicEmail}}"] || localValues["{{run.dynamicEmail}}"];
+  switch (preference) {
+    case "run":
+      return localValues["{{run.dynamicEmail}}"];
+    case "global":
+      return globalValues?.["{{global.dynamicEmail}}"] || localValues["{{run.dynamicEmail}}"];
+    case "auto":
+    default:
+      return globalValues?.["{{global.dynamicEmail}}"] || localValues["{{run.dynamicEmail}}"];
+  }
 }
 
 /**

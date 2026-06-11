@@ -137,8 +137,14 @@ export const runSteps = async ({
   }
 
   // Process dynamic placeholders before running steps
-  const { processedSteps, processedAssertions, localValues, globalValues, projectDataValues } =
-    await processPlaceholders(steps, assertions, executionId, projectId);
+  const {
+    processedSteps,
+    processedAssertions,
+    localValues,
+    globalValues,
+    projectDataValues,
+    dynamicEmailPreference,
+  } = await processPlaceholders(steps, assertions, executionId, projectId);
 
   logger.info(`Starting step-by-step execution of ${processedSteps.length} steps.`);
 
@@ -163,12 +169,9 @@ export const runSteps = async ({
   let errorInStepExecution,
     stepThatFailed: string = "";
   for (let i = 0; i < processedSteps.length; i++) {
-    // Resolve email placeholders lazily just before step execution
-    // This ensures the email has arrived before we try to extract content
-    // Use global email if available, otherwise fall back to run email, and then use the supplied email from regex
-
-    // ~~~ This logic needs to be fixed as global email will always be present if executionId is provided ~~~
-    const dynamicEmail = getDynamicEmail(localValues, globalValues);
+    // Resolve email placeholders lazily just before step execution.
+    // This ensures the email has arrived before we try to extract content.
+    const dynamicEmail = getDynamicEmail(localValues, globalValues, dynamicEmailPreference);
 
     // Re-process step data and waitUntil with current localValues to pick up extracted values from previous steps
     let currentStep = processedSteps[i];
