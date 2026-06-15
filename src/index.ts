@@ -165,8 +165,7 @@ export const runSteps = async ({
   for (let i = 0; i < processedSteps.length; i++) {
     // Resolve email placeholders lazily just before step execution.
     // Only use the shared global email when these steps actually reference
-    // {{global.*}} placeholders; otherwise each runSteps call gets its own
-    // run-scoped address so independent flows don't bleed into each other.
+    // {{global.*}} placeholders;
     const dynamicEmail = getDynamicEmail(localValues, globalValues, hasGlobalPlaceholders);
 
     // Re-process step data and waitUntil with current localValues to pick up extracted values from previous steps
@@ -647,7 +646,7 @@ export const runSteps = async ({
           images,
           failSilently: failAssertionsSilently,
           maxRetries: 1,
-          onRetry: (retryCount, previousResult) => {},
+          onRetry: (retryCount, previousResult) => { },
           video: video && Boolean(videoRecorder),
           videoFilePath: videoRecorder?.filePath,
         });

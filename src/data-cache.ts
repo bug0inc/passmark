@@ -363,7 +363,7 @@ export function replacePlaceholders(
   for (const placeholder of dynamicEmailPlaceholders) {
     if (result.includes(placeholder) && !getConfig().email) {
       throw new ConfigurationError(
-      `Email provider not configured. Call configure({ email: ... }) before using ${placeholder}.`,
+        `Email provider not configured. Call configure({ email: ... }) before using ${placeholder}.`,
       );
     }
   }
@@ -428,7 +428,7 @@ export async function processPlaceholders(
   if (hasGlobalExtract && !executionId) {
     throw new ValidationError(
       'extract with scope "global" requires an executionId. ' +
-        "Please provide executionId in runSteps options to extract values into the global scope.",
+      "Please provide executionId in runSteps options to extract values into the global scope.",
     );
   }
 
@@ -536,7 +536,7 @@ export async function processPlaceholders(
  * Gets the dynamic email to use for email extraction.
  * Only prefers global email when preferGlobal is true (i.e. the current step
  * set actually references {{global.*}} placeholders). Otherwise always returns
- * the run-scoped email so each runSteps call gets its own isolated address.
+ * the run-scoped email so all steps in the current runSteps call share a run scoped email.
  */
 export function getDynamicEmail(
   localValues: LocalPlaceholders,
