@@ -3,6 +3,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createOpenAI } from "@ai-sdk/openai";
 import { gateway, type LanguageModel } from "ai";
 import { wrapAISDKModel } from "axiom/ai";
 import { type AIGateway, getConfig } from "./config";
@@ -16,6 +17,7 @@ let _google: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 let _anthropic: ReturnType<typeof createAnthropic> | null = null;
 let _openai: ReturnType<typeof createOpenAI> | null = null;
 let _openrouter: ReturnType<typeof createOpenRouter> | null = null;
+let _opencodezen: ReturnType<typeof createOpenAI> | null = null;
 let _cloudflareGoogle: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 let _cloudflareAnthropic: ReturnType<typeof createAnthropic> | null = null;
 
@@ -73,6 +75,21 @@ function getOpenRouterProvider() {
     });
   }
   return _openrouter;
+}
+
+function getOpenCodeZenProvider() {
+  if (!_opencodezen) {
+    if (!process.env.OPENCODEZEN_API_KEY) {
+      throw new ConfigurationError(
+        "OPENCODEZEN_API_KEY isn't set. Add it to your environment (for example: export OPENCODEZEN_API_KEY=your_key). See .env.example for reference.",
+      );
+    }
+    _opencodezen = createOpenAI({
+      baseURL: "https://opencode.ai/zen/v1",
+      apiKey: process.env.OPENCODEZEN_API_KEY,
+    });
+  }
+  return _opencodezen;
 }
 
 /**
@@ -165,6 +182,29 @@ function resolveOpenRouterModelId(modelId: string): string {
 }
 
 /**
+ * Maps canonical model IDs (provider/model) to OpenCode Zen model IDs.
+ * Zen strips the provider prefix and uses its own naming for some models.
+ */
+const OPENCODEZEN_MODEL_ALIASES: Record<string, string> = {
+  "google/gemini-3.1-pro-preview": "gemini-3.1-pro",
+  "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
+  "anthropic/claude-haiku-4-5": "claude-haiku-4-5",
+  "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
+  "anthropic/claude-sonnet-4-6": "claude-sonnet-4-6",
+  "anthropic/claude-opus-4.7": "claude-opus-4-7",
+  "anthropic/claude-opus-4-7": "claude-opus-4-7",
+};
+
+function resolveOpenCodeZenModelId(modelId: string): string {
+  if (OPENCODEZEN_MODEL_ALIASES[modelId]) {
+    return OPENCODEZEN_MODEL_ALIASES[modelId];
+  }
+  // Strip provider prefix: "google/gemini-3-flash" → "gemini-3-flash"
+  const slashIndex = modelId.indexOf("/");
+  return slashIndex !== -1 ? modelId.slice(slashIndex + 1) : modelId;
+}
+
+/**
  * Resolves a canonical model ID to a LanguageModel instance wrapped with Axiom instrumentation.
  * Input format: "provider/model-name" (e.g. "google/gemini-3-flash")
  *
@@ -199,6 +239,10 @@ export function resolveModel(modelId: string, gatewayOverride?: AIGateway): Lang
 
   if (gatewayConfig === "openrouter") {
     return wrapModel(getOpenRouterProvider()(resolveOpenRouterModelId(modelId)));
+  }
+
+  if (gatewayConfig === "opencodezen") {
+    return wrapModel(getOpenCodeZenProvider()(resolveOpenCodeZenModelId(modelId)));
   }
 
   const [provider, ...rest] = modelId.split("/");

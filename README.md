@@ -31,9 +31,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_GENERATIVE_AI_API_KEY=AIza...
 ```
 
-Alternatively, you can use an AI gateway like Vercel AI Gateway or OpenRouter to route requests to multiple providers without managing individual API keys. If you choose this option, set `AI_GATEWAY_API_KEY` (for Vercel) or `OPENROUTER_API_KEY` (for OpenRouter) instead.
+Alternatively, you can use an AI gateway like Vercel AI Gateway, OpenRouter, or OpenCode Zen to route requests to multiple providers without managing individual API keys. If you choose this option, set `AI_GATEWAY_API_KEY` (for Vercel), `OPENROUTER_API_KEY` (for OpenRouter), or `OPENCODEZEN_API_KEY` (for OpenCode Zen) instead.
 
-You can also route requests through Cloudflare AI Gateway for observability, caching, and rate limiting. Unlike Vercel/OpenRouter, Cloudflare is a proxy (not a reseller), so you still need your own `ANTHROPIC_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` alongside `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_GATEWAY` (and `CLOUDFLARE_AI_GATEWAY_API_KEY` if the gateway has authentication enabled).
+You can also route requests through Cloudflare AI Gateway for observability, caching, and rate limiting. Unlike Vercel/OpenRouter/OpenCode Zen, Cloudflare is a proxy (not a reseller), so you still need your own `ANTHROPIC_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` alongside `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_GATEWAY` (and `CLOUDFLARE_AI_GATEWAY_API_KEY` if the gateway has authentication enabled).
 
 Set your Playwright project to read `.env` by adding the following to `playwright.config.ts`  (after `import { defineConfig, devices } from '@playwright/test';`):
 
@@ -82,8 +82,9 @@ import { runSteps, configure } from "passmark";
 
 configure({
   ai: {
-    gateway: "vercel" // or "openrouter" or "cloudflare"
-    // Set AI_GATEWAY_API_KEY (Vercel), OPENROUTER_API_KEY (OpenRouter), or
+    gateway: "vercel" // or "openrouter", "opencodezen", or "cloudflare"
+    // Set AI_GATEWAY_API_KEY (Vercel), OPENROUTER_API_KEY (OpenRouter),
+    // OPENCODEZEN_API_KEY (OpenCode Zen), or
     // CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AI_GATEWAY (+ CLOUDFLARE_AI_GATEWAY_API_KEY
     // if the gateway is authenticated) in your .env file. Cloudflare also requires
     // the upstream provider keys (ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY).
@@ -263,7 +264,7 @@ import { configure } from "passmark";
 
 configure({
   ai: {
-    gateway: "none", // "none" (default), "vercel", "openrouter", or "cloudflare"
+    gateway: "none", // "none" (default), "vercel", "openrouter", "opencodezen", or "cloudflare"
     models: {
       stepExecution: "google/gemini-3-flash",
       utility: "google/gemini-2.5-flash",
@@ -283,6 +284,7 @@ configure({
 | `OPENAI_API_KEY` | No | - | OpenAI API key for OpenAI models (required for CUA mode; must have Responses-API `computer` tool access) |
 | `AI_GATEWAY_API_KEY` | If gateway=vercel | - | Vercel AI Gateway API key |
 | `OPENROUTER_API_KEY` | If gateway=openrouter | - | OpenRouter API key |
+| `OPENCODEZEN_API_KEY` | If gateway=opencodezen | - | OpenCode Zen API key |
 | `CLOUDFLARE_ACCOUNT_ID` | If gateway=cloudflare | - | Cloudflare account ID that owns the AI Gateway |
 | `CLOUDFLARE_AI_GATEWAY` | If gateway=cloudflare | - | Cloudflare AI Gateway name (slug) |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | If gateway=cloudflare and the gateway is authenticated | - | Cloudflare AI Gateway token (sent as `cf-aig-authorization`) |
