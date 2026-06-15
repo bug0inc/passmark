@@ -6,6 +6,7 @@ import { logger } from "./logger";
 import { resolveModel } from "./models";
 import { AssertionResult, AssertionOptions } from "./types";
 import { resolvePage, safeSnapshot, withTimeout } from "./utils";
+import { assertVideoFile, deleteGeminiFile, uploadVideoToGemini } from "./video";
 
 const assertionSchema = z.object({
   assertionPassed: z.boolean().describe("Indicates whether the assertion passed or not."),
@@ -55,8 +56,50 @@ export const assert = async ({
   effort = "low",
   images,
   failSilently,
+  maxRetries = 1,
+  onRetry = (retryCount: number, previousResult: AssertionResult) => { },
+  video,
+  videoFilePath,
 }: AssertionOptions): Promise<string> => {
   const thinkingEnabled = effort === "high";
+
+  // Video assertion path: when a recorded video is provided, evaluate the
+  // assertion against the full video using a video-capable Gemini model.
+  // Consensus isn't available here (Claude doesn't accept video), so this is
+  // a single-model call. The screenshot/snapshot path below is unchanged.
+  if (video && videoFilePath) {
+    logger.debug({ assertion, videoFilePath }, "Running video assertion path");
+    const runVideoAssertion = async (): Promise<AssertionResult> => {
+      const file = await uploadVideoToGemini(videoFilePath);
+      try {
+        return await assertVideoFile({
+          assertion,
+          fileUri: file.uri,
+          fileMimeType: file.mimeType,
+        });
+      } finally {
+        await deleteGeminiFile(file.name);
+      }
+    };
+
+    let videoResult = await runVideoAssertion();
+    for (let retry = 0; retry < maxRetries && !videoResult.assertionPassed; retry++) {
+      logger.debug("Video assertion failed, retrying...");
+      onRetry(retry, videoResult);
+      videoResult = await runVideoAssertion();
+    }
+
+    test?.info().annotations.push({
+      type: "AI Summary (video analysis)",
+      description: videoResult.reasoning,
+    });
+
+    const status = videoResult.assertionPassed ? "✅ passed" : "❌ failed";
+    if (!failSilently) {
+      expect(videoResult.assertionPassed, videoResult.reasoning).toBe(true);
+    }
+    return `${videoResult.reasoning}\n\n[Assertion ${status}]`;
+  }
 
   const runFullAssertion = async (): Promise<AssertionResult> => {
     const snapshot = await safeSnapshot(page);
@@ -71,7 +114,7 @@ export const assert = async ({
 
     const basePrompt = `
 You are an AI-powered QA Agent designed to test web applications.
-            
+
 You have access to the following information. Based on this information, you'll tell us whether the assertion provided below should pass or not.
 ${!images
         ? `
@@ -312,8 +355,9 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
   // Run assertion with retry on failure
   let result = await runFullAssertion();
 
-  if (!result.assertionPassed) {
+  for (let retry = 0; retry < maxRetries && !result.assertionPassed; retry++) {
     logger.debug("Assertion failed, retrying with fresh snapshot and screenshot...");
+    onRetry(retry, result);
     result = await runFullAssertion();
   }
 
