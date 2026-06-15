@@ -101,24 +101,25 @@ describe("extractEmailContent", () => {
     expect(result).toBe("extracted-456");
   });
 
-  it("throws AIModelError when max retries exceeded", async () => {
-    const { extractEmailContent } = await import("../email");
-    const extractContentMock = vi.fn().mockRejectedValue(new Error("Always fails"));
-      
-    configure({ email: { domain: "test.com", extractContent: extractContentMock } });
-    
-    const promise = expect(
-      extractEmailContent({
-        email: "test3@test.com",
-        prompt: "get code",
-        maxRetries: 2,
-        retryDelayMs: 10,
-      })
-    ).rejects.toThrow("Failed to extract email content after 2 attempts. Email: test3@test.com, Prompt: get code");
+it("throws AIModelError when max retries exceeded", async () => {
+  const { extractEmailContent } = await import("../email");
+  const extractContentMock = vi.fn().mockRejectedValue(new Error("Always fails"));
 
-    await vi.runAllTimersAsync();
-    await promise;
+  configure({ email: { domain: "test.com", extractContent: extractContentMock } });
 
-    expect(extractContentMock).toHaveBeenCalledTimes(2);
+  const promise = extractEmailContent({
+    email: "test3@test.com",
+    prompt: "get code",
+    maxRetries: 2,
+    retryDelayMs: 10,
   });
+
+  await vi.runAllTimersAsync();
+
+  await expect(promise).rejects.toMatchObject({ name: "AIModelError", code: "AI_MODEL_ERROR" });
+  await expect(promise).rejects.toThrow(
+    "Failed to extract email content after 2 attempts. Email: test3@test.com, Prompt: get code"
+  );
+
+  expect(extractContentMock).toHaveBeenCalledTimes(2);
 });
