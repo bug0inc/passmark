@@ -1,15 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock instrumentation (imported as side effect)
-vi.mock("../../instrumentation", () => ({ axiomEnabled: false }));
+// Mock instrumentation
+vi.mock("../../instrumentation", () => ({
+  isAxiomEnabled: () => false,
+  initTelemetry: vi.fn(),
+}));
 
 // Mock Cache
+const mockCache = {
+  hgetall: vi.fn().mockResolvedValue({}),
+  hset: vi.fn().mockResolvedValue(undefined),
+  expire: vi.fn().mockResolvedValue(undefined),
+};
 vi.mock("../../cache", () => ({
-  cache: {
-    hgetall: vi.fn().mockResolvedValue({}),
-    hset: vi.fn().mockResolvedValue(undefined),
-    expire: vi.fn().mockResolvedValue(undefined),
-  },
+  getCache: () => mockCache,
 }));
 
 // Mock AI SDK
@@ -87,10 +91,17 @@ vi.mock("../../utils/secure-script-runner", () => ({
   runSecureScript: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock the CUA module so runSteps' "mode: cua" branch is observable.
+vi.mock("../../cua", () => ({
+  runCUALoop: vi.fn().mockResolvedValue("cua-result"),
+  buildRunStepsPromptCUA: vi.fn().mockReturnValue("cua-prompt"),
+  buildRunUserFlowPromptCUA: vi.fn().mockReturnValue("cua-userflow-prompt"),
+}));
+
 import { runSteps } from "../../index";
-import { resetConfig } from "../../config";
-import { cache } from "../../cache";
+import { configure, resetConfig } from "../../config";
 import { generateText } from "ai";
+import { runCUALoop } from "../../cua";
 import type { Page } from "@playwright/test";
 import type { Step } from "../../types";
 
@@ -122,7 +133,7 @@ describe("runSteps", () => {
     vi.clearAllMocks();
     resetConfig();
     // Reset cache mock to default empty
-    vi.mocked(cache!.hgetall).mockResolvedValue({});
+    vi.mocked(mockCache.hgetall).mockResolvedValue({});
   });
 
   it("executes a simple step", async () => {
@@ -199,7 +210,7 @@ describe("runSteps", () => {
     const steps: Step[] = [{ description: "Click submit" }];
 
     // Mock cache to return cached step data
-    vi.mocked(cache!.hgetall).mockResolvedValue({
+    vi.mocked(mockCache.hgetall).mockResolvedValue({
       locator: 'getByRole("button", { name: "Submit" })',
       action: "click",
       description: "Submit button",
@@ -221,7 +232,7 @@ describe("runSteps", () => {
     const steps: Step[] = [{ description: "Click submit" }];
 
     // Mock cache to return cached step data
-    vi.mocked(cache!.hgetall).mockResolvedValue({
+    vi.mocked(mockCache.hgetall).mockResolvedValue({
       locator: 'getByRole("button", { name: "Submit" })',
       action: "click",
       description: "Submit button",
@@ -288,11 +299,75 @@ describe("runSteps", () => {
     ]);
   });
 
+  it("routes per-step ai overrides — hybrid snapshot + CUA in one runSteps call", async () => {
+    const page = createMockPage();
+
+    // Global default: openrouter snapshot mode. Steps 1 and 3 should follow this
+    // (and hit generateText). Step 2 overrides to CUA + gateway:none and should
+    // hit runCUALoop instead.
+    configure({ ai: { gateway: "openrouter", mode: "snapshot" } });
+
+    const steps: Step[] = [
+      { description: "Open product page" },
+      { description: "Drag the price slider", ai: { mode: "cua", gateway: "none" } },
+      { description: "Click add to cart" },
+    ];
+
+    await runSteps({
+      page,
+      userFlow: "hybrid flow",
+      steps,
+    });
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect(runCUALoop).toHaveBeenCalledTimes(1);
+    const cuaArgs = vi.mocked(runCUALoop).mock.calls[0][0];
+    expect(cuaArgs.gateway).toBe("none");
+  });
+
+  it("call-level ai option applies to all steps without per-step override", async () => {
+    const page = createMockPage();
+
+    const steps: Step[] = [
+      { description: "Step A" },
+      { description: "Step B" },
+    ];
+
+    await runSteps({
+      page,
+      userFlow: "all cua flow",
+      steps,
+      ai: { mode: "cua", gateway: "none" },
+    });
+
+    expect(runCUALoop).toHaveBeenCalledTimes(2);
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("step.ai beats runSteps.ai (step override wins)", async () => {
+    const page = createMockPage();
+
+    const steps: Step[] = [
+      { description: "Snapshot step", ai: { mode: "snapshot" } },
+      { description: "CUA step (inherits call-level)" },
+    ];
+
+    await runSteps({
+      page,
+      userFlow: "mixed override flow",
+      steps,
+      ai: { mode: "cua", gateway: "none" },
+    });
+
+    expect(generateText).toHaveBeenCalledTimes(1);
+    expect(runCUALoop).toHaveBeenCalledTimes(1);
+  });
+
   it("bypasses cache for individual step when step.bypassCache is true", async () => {
     const page = createMockPage();
 
     // Mock cache to return cached data
-    vi.mocked(cache!.hgetall).mockResolvedValue({
+    vi.mocked(mockCache.hgetall).mockResolvedValue({
       locator: 'getByRole("button", { name: "Go" })',
       action: "click",
       description: "Go button",

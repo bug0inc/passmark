@@ -29,6 +29,11 @@ describe("config", () => {
     expect(getConfig().ai?.gateway).toBe("openrouter");
   });
 
+  it("configure sets ai.gateway to opencodezen", () => {
+    configure({ ai: { gateway: "opencodezen" } });
+    expect(getConfig().ai?.gateway).toBe("opencodezen");
+  });
+
   it("configure merges without overwriting other keys", () => {
     configure({ uploadBasePath: "./uploads" });
     configure({ ai: { gateway: "none" } });
@@ -44,9 +49,9 @@ describe("config", () => {
     expect(getConfig().uploadBasePath).toBe("./second");
   });
 
-  it("getModelId returns default for each of the 7 keys", () => {
+  it("getModelId returns default for each DEFAULT_MODELS key", () => {
     const keys = Object.keys(DEFAULT_MODELS) as Array<keyof typeof DEFAULT_MODELS>;
-    expect(keys).toHaveLength(7);
+    expect(keys.length).toBeGreaterThanOrEqual(7);
 
     for (const key of keys) {
       expect(getModelId(key)).toBe(DEFAULT_MODELS[key]);

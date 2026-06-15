@@ -135,6 +135,16 @@ export async function waitForDOMStabilization(
       await resolvePage(input).evaluate(
         ({ idleTime, timeout }) => {
           return new Promise<void>((resolve) => {
+            // document.body can be null mid-navigation (new document created,
+            // <body> not parsed yet). MutationObserver.observe() would throw a
+            // TypeError on a null target — skip stabilization in that case;
+            // the caller's next step will trigger its own waits.
+            // @ts-expect-error document exists in browser context via page.evaluate
+            if (!document.body) {
+              resolve();
+              return;
+            }
+
             let timeoutId: ReturnType<typeof setTimeout>;
             // eslint-disable-next-line prefer-const
             let overallTimeoutId: ReturnType<typeof setTimeout>;
