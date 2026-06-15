@@ -31,9 +31,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_GENERATIVE_AI_API_KEY=AIza...
 ```
 
-Alternatively, you can use an AI gateway like Vercel AI Gateway or OpenRouter to route requests to multiple providers without managing individual API keys. If you choose this option, set `AI_GATEWAY_API_KEY` (for Vercel) or `OPENROUTER_API_KEY` (for OpenRouter) instead.
+Alternatively, you can use an AI gateway like Vercel AI Gateway, OpenRouter, or OpenCode Zen to route requests to multiple providers without managing individual API keys. If you choose this option, set `AI_GATEWAY_API_KEY` (for Vercel), `OPENROUTER_API_KEY` (for OpenRouter), or `OPENCODEZEN_API_KEY` (for OpenCode Zen) instead.
 
-You can also route requests through Cloudflare AI Gateway for observability, caching, and rate limiting. Unlike Vercel/OpenRouter, Cloudflare is a proxy (not a reseller), so you still need your own `ANTHROPIC_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` alongside `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_GATEWAY` (and `CLOUDFLARE_AI_GATEWAY_API_KEY` if the gateway has authentication enabled).
+You can also route requests through Cloudflare AI Gateway for observability, caching, and rate limiting. Unlike Vercel/OpenRouter/OpenCode Zen, Cloudflare is a proxy (not a reseller), so you still need your own `ANTHROPIC_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` alongside `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_GATEWAY` (and `CLOUDFLARE_AI_GATEWAY_API_KEY` if the gateway has authentication enabled).
 
 Set your Playwright project to read `.env` by adding the following to `playwright.config.ts`  (after `import { defineConfig, devices } from '@playwright/test';`):
 
@@ -82,8 +82,9 @@ import { runSteps, configure } from "passmark";
 
 configure({
   ai: {
-    gateway: "vercel" // or "openrouter" or "cloudflare"
-    // Set AI_GATEWAY_API_KEY (Vercel), OPENROUTER_API_KEY (OpenRouter), or
+    gateway: "vercel" // or "openrouter", "opencodezen", or "cloudflare"
+    // Set AI_GATEWAY_API_KEY (Vercel), OPENROUTER_API_KEY (OpenRouter),
+    // OPENCODEZEN_API_KEY (OpenCode Zen), or
     // CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AI_GATEWAY (+ CLOUDFLARE_AI_GATEWAY_API_KEY
     // if the gateway is authenticated) in your .env file. Cloudflare also requires
     // the upstream provider keys (ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY).
@@ -135,15 +136,39 @@ test("Shopping cart tests", async ({ page }) => {
 
 Notes:
 
-- CUA mode uses OpenAI's `gpt-5.5` + built-in `computer` tool.
+- CUA mode uses OpenAI's `gpt-5.5` + built-in `computer` tool. The CUA model is currently locked and not user-configurable.
 - Redis step caching is skipped in CUA mode because coordinate actions aren't portable across viewport sizes.
 - `gateway: "vercel" | "openrouter" | "cloudflare"` is not compatible with CUA — the Responses-API `computer` tool is only exposed on direct OpenAI access.
 - Account requirements: your OpenAI API key must have access to the CUA model and the built-in `computer` tool on the Responses API.
+
+#### Per-step overrides (hybrid runs)
+
+The same `ai` shape accepted by `configure()` can also be passed at the `runSteps`/`runUserFlow` call level **and** on individual `Step`s. This lets you mix snapshot steps (cheap, cacheable, OpenRouter/Vercel/etc.) with CUA steps (visual, direct OpenAI) in a single run. Precedence: `step.ai` ▶ call-level `ai` ▶ global `configure()`.
+
+```typescript
+configure({ ai: { gateway: "openrouter" } }); // most steps go through OpenRouter
+
+await runSteps({
+  page, test, expect,
+  userFlow: "Buy product on sale",
+  steps: [
+    { description: "Navigate to /products" },                     // OpenRouter snapshot
+    {
+      description: "Drag the price slider to $40",
+      ai: { mode: "cua", gateway: "none" },                       // CUA for this step only
+    },
+    { description: "Click Add to cart" },                         // back to OpenRouter snapshot
+  ],
+});
+```
+
+Set `OPENAI_API_KEY` whenever any step opts into `mode: "cua"`. CUA steps still require `gateway: "none"`; mixing CUA with a non-`none` gateway throws at the per-step level for the same reason it does globally.
 
 ## Features
 
 - **Core Execution** — `runSteps()` and `runUserFlow()` for flexible test orchestration in natural language, with smart caching and auto-healing
 - **Multi-Model Assertion Engine** — Consensus-based validation using Claude and Gemini, with an arbiter model to resolve disagreements
+- **Video Assertions** — Opt in per-assertion to record the full step run and evaluate the assertion against the whole video via Gemini's Files API. Useful for ephemeral UI (toasts, snackbars) that a single screenshot may miss
 - **Redis-Based Step Caching** — Cache-first execution with AI fallback and automatic self-healing when cached steps fail
 - **Configurable AI Models** — 8 dedicated model slots for step execution, assertions, extraction, and more
 - **AI Gateway Support** — Route requests through Vercel AI Gateway, OpenRouter, Cloudflare AI Gateway, or connect directly to provider SDKs
@@ -192,7 +217,7 @@ const result = await runUserFlow({
 
 ### `assert(options: AssertionOptions)`
 
-Multi-model consensus assertion. Runs Claude and Gemini in parallel; if they disagree, a third model arbitrates.
+Multi-model consensus assertion. Runs Claude and Gemini in parallel; if they disagree, a third model arbitrates (configurable — see [Consensus Policy](#consensus-policy)).
 
 ```typescript
 const result = await assert({
@@ -201,6 +226,53 @@ const result = await assert({
   expect,
 });
 ```
+
+### Consensus Policy
+
+When the primary (Claude) and secondary (Gemini) assertion models reach the same verdict, the result is used directly. When they **disagree**, you choose how Passmark resolves it:
+
+| Policy | Behavior |
+|---|---|
+| `consult-arbiter-on-disagreement` *(default)* | Calls the arbiter model (Gemini 3.1 Pro) to break the tie. |
+| `fail-on-disagreement` | Treats any disagreement as a failure immediately — no arbiter call. The returned reasoning includes both models' takes so you can inspect what they saw differently. |
+
+Pick `fail-on-disagreement` when you'd rather surface ambiguity/flakiness in the UI under test than let a single model swing the result. Pick the default when you trust the arbiter to make the final call.
+
+```typescript
+configure({
+  assertions: {
+    consensusPolicy: "fail-on-disagreement",
+  },
+});
+```
+
+### Video Assertions
+
+For UI that's only visible for a second or two — toast messages, snackbar confirmations, transient banners — a single end-of-flow screenshot often misses the evidence. Set `video: true` on an assertion inside `runSteps` and Passmark will record the entire step run with `page.screencast`, upload the resulting `.webm` to Gemini's Files API, and evaluate the assertion against the full video:
+
+```typescript
+await runSteps({
+  page,
+  userFlow: "Add to cart",
+  steps: [
+    { description: "Click Acme Circles T-Shirt" },
+    { description: "Add to cart" },
+  ],
+  assertions: [
+    { assertion: "An 'Added to cart' toast appears", video: true },
+  ],
+  test,
+  expect,
+});
+```
+
+Notes:
+
+- Recording spans the **entire** step run (start of first step to end of last step). One recording is shared across all `video: true` assertions in the same `runSteps` call.
+- The video file is written to `/tmp/passmark-recordings/` by default and deleted automatically after the assertions consume it. Override via `configure({ videoDir: "/your/path" })`.
+- This path uses **only Gemini** (no Claude/Gemini consensus) since Claude doesn't accept video. The model is `gemini-3-flash-preview`.
+- Video assertions go **directly** to Gemini's Files API regardless of any configured `gateway` — file URIs are tied to the uploading Google account, so the gateway can't proxy them. You must set `GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) even when the rest of your stack runs through Vercel / OpenRouter / Cloudflare.
+- If `page.screencast.start()` fails (rare), video assertions silently fall back to the regular screenshot/snapshot path so the run still completes.
 
 ## Configuration
 
@@ -211,7 +283,7 @@ import { configure } from "passmark";
 
 configure({
   ai: {
-    gateway: "none", // "none" (default), "vercel", "openrouter", or "cloudflare"
+    gateway: "none", // "none" (default), "vercel", "openrouter", "opencodezen", or "cloudflare"
     models: {
       stepExecution: "google/gemini-3-flash",
       utility: "google/gemini-2.5-flash",
@@ -225,17 +297,18 @@ configure({
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `REDIS_URL` | No | - | Redis connection URL for step caching and global state |
+| `REDIS_URL` | No | - | Redis connection URL for step caching and global state. Can also be set via `configure({ redis: { url } })`, which takes precedence. |
 | `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude models |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models. Also required for `video: true` assertions regardless of gateway (file URIs are tied to the uploading account). |
+| `OPENAI_API_KEY` | No | - | OpenAI API key for OpenAI models (required for CUA mode; must have Responses-API `computer` tool access) |
 | `AI_GATEWAY_API_KEY` | If gateway=vercel | - | Vercel AI Gateway API key |
 | `OPENROUTER_API_KEY` | If gateway=openrouter | - | OpenRouter API key |
+| `OPENCODEZEN_API_KEY` | If gateway=opencodezen | - | OpenCode Zen API key |
 | `CLOUDFLARE_ACCOUNT_ID` | If gateway=cloudflare | - | Cloudflare account ID that owns the AI Gateway |
 | `CLOUDFLARE_AI_GATEWAY` | If gateway=cloudflare | - | Cloudflare AI Gateway name (slug) |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | If gateway=cloudflare and the gateway is authenticated | - | Cloudflare AI Gateway token (sent as `cf-aig-authorization`) |
-| `OPENAI_API_KEY` | If mode=cua | - | OpenAI API key (required for CUA mode; must have Responses-API `computer` tool access) |
-| `AXIOM_TOKEN` | No | - | Axiom token for OpenTelemetry tracing |
-| `AXIOM_DATASET` | No | - | Axiom dataset for trace storage |
+| `AXIOM_TOKEN` | No | - | Axiom token for OpenTelemetry tracing. Can also be set via `configure({ telemetry: { axiomToken } })`, which takes precedence. |
+| `AXIOM_DATASET` | No | - | Axiom dataset for trace storage. Can also be set via `configure({ telemetry: { axiomDataset } })`, which takes precedence. |
 | `PASSMARK_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
 
 ## Model Configuration
@@ -257,6 +330,8 @@ All models are configurable via `configure({ ai: { models: { ... } } })`:
 
 Passmark caches successful step actions in Redis. On subsequent runs, cached steps execute directly without AI calls, dramatically reducing latency and cost.
 
+Provide the connection via `configure({ redis: { url } })` or the `REDIS_URL` env var (configure value wins). Without either, caching, `{{global.*}}` placeholders, and project data are disabled.
+
 - Steps are cached by `userFlow` + `step.description`
 - Set `bypassCache: true` on individual steps or the entire run to force AI execution
 - Cache is automatically bypassed on Playwright retries
@@ -264,9 +339,18 @@ Passmark caches successful step actions in Redis. On subsequent runs, cached ste
 
 ## Telemetry
 
-Telemetry is opt-in. Set `AXIOM_TOKEN` and `AXIOM_DATASET` to enable OpenTelemetry tracing via Axiom. All AI calls are wrapped with `withSpan` for observability.
+Telemetry is opt-in. Either set the `AXIOM_TOKEN` and `AXIOM_DATASET` env vars, or pass them through `configure()`:
 
-Without these env vars, telemetry is a no-op.
+```typescript
+configure({
+  telemetry: {
+    axiomToken: process.env.MY_AXIOM_TOKEN,
+    axiomDataset: "passmark-traces",
+  },
+});
+```
+
+`configure()` values take precedence over env vars. Without either, telemetry is a no-op. All AI calls are wrapped with `withSpan` for observability.
 
 Configure Axiom to get a rich dashboard like this:
 

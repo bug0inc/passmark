@@ -1,6 +1,6 @@
 {
   "name": "passmark",
-  "version": "1.0.9",
+  "version": "1.0.14",
   "description": "The open-source AI framework for regression testing.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -45,6 +45,7 @@
     "@ai-sdk/google-vertex": "^4.0.105",
     "@ai-sdk/openai": "^3.0.52",
     "@faker-js/faker": "^10.1.0",
+    "@google/genai": "^2.1.0",
     "@openrouter/ai-sdk-provider": "^2.5.1",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.207.0",
@@ -53,7 +54,7 @@
     "@opentelemetry/semantic-conventions": "^1.37.0",
     "acorn": "^8.15.0",
     "ai": "^6.0.161",
-    "axiom": "^0.22.2",
+    "axiom": "^0.46.1",
     "ioredis": "^5.10.1",
     "openai": "^6.34.0",
     "pino": "^10.3.1",
@@ -80,6 +81,9 @@
     "node": ">=18.0.0"
   },
   "packageManager": "pnpm@10.33.0",
+  "overrides": {
+    "tar": "^7.5.0"
+  },
   "publishConfig": {
     "access": "public"
   }

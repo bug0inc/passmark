@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type OpenAI from "openai";
-import { getModelId } from "../config";
+import { type AIGateway, getModelId } from "../config";
 import { logger } from "../logger";
 import { waitForDOMStabilization } from "../utils";
 import { executeAction, type ComputerAction } from "./actions";
@@ -18,6 +18,8 @@ export type RunCUALoopOptions = {
   onReasoning?: (reasoning: string) => void;
   /** Optional override client (used by tests). */
   client?: OpenAI;
+  /** Resolved per-call gateway. Must be "none" for CUA. Defaults to "none". */
+  gateway?: AIGateway;
 };
 
 /**
@@ -74,8 +76,9 @@ export async function runCUALoop({
   abortSignal,
   onReasoning,
   client,
+  gateway,
 }: RunCUALoopOptions): Promise<string> {
-  const openai = (client ?? getOpenAIClient()) as OpenAIWithResponses;
+  const openai = (client ?? getOpenAIClient(gateway ?? "none")) as OpenAIWithResponses;
   const model = getModelId("cua");
 
   // Current (2026) API: gpt-5.5 uses the simpler `{ type: "computer" }` tool.

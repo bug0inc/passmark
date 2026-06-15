@@ -19,26 +19,32 @@ describe("cua/client/getOpenAIClient", () => {
     }
   });
 
-  it("throws ConfigurationError when gateway is not 'none'", () => {
-    configure({ ai: { gateway: "openrouter", mode: "cua" } });
+  it("throws ConfigurationError when gateway argument is not 'none'", () => {
     process.env.OPENAI_API_KEY = "sk-test";
-    expect(() => getOpenAIClient()).toThrow(ConfigurationError);
-    expect(() => getOpenAIClient()).toThrow(/gateway: "none"/);
+    expect(() => getOpenAIClient("openrouter")).toThrow(ConfigurationError);
+    expect(() => getOpenAIClient("openrouter")).toThrow(/gateway: "none"/);
   });
 
   it("throws ConfigurationError when OPENAI_API_KEY is missing", () => {
-    configure({ ai: { mode: "cua" } });
     delete process.env.OPENAI_API_KEY;
     expect(() => getOpenAIClient()).toThrow(ConfigurationError);
     expect(() => getOpenAIClient()).toThrow(/OPENAI_API_KEY/);
   });
 
-  it("returns a client when gateway='none' and key is set", () => {
-    configure({ ai: { mode: "cua", gateway: "none" } });
+  it("returns a client when gateway is 'none' and key is set", () => {
     process.env.OPENAI_API_KEY = "sk-test";
-    const client = getOpenAIClient();
+    const client = getOpenAIClient("none");
     expect(client).toBeDefined();
     // Singleton: second call returns the same instance.
-    expect(getOpenAIClient()).toBe(client);
+    expect(getOpenAIClient("none")).toBe(client);
+  });
+
+  it("succeeds with gateway='none' even when global gateway is non-none (hybrid case)", () => {
+    // Per-step override path: global says openrouter, but a CUA step resolves
+    // its gateway to 'none' and passes that explicitly.
+    configure({ ai: { gateway: "openrouter" } });
+    process.env.OPENAI_API_KEY = "sk-test";
+    const client = getOpenAIClient("none");
+    expect(client).toBeDefined();
   });
 });

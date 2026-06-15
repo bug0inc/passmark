@@ -3,18 +3,21 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createOpenAI } from "@ai-sdk/openai";
 import { gateway, type LanguageModel } from "ai";
 import { wrapAISDKModel } from "axiom/ai";
-import { getConfig } from "./config";
-import { axiomEnabled } from "./instrumentation";
+import { type AIGateway, getConfig } from "./config";
+import { isAxiomEnabled } from "./instrumentation";
 
 function wrapModel(model: LanguageModel): LanguageModel {
-  return axiomEnabled ? wrapAISDKModel(model) : model;
+  return isAxiomEnabled() ? wrapAISDKModel(model) : model;
 }
 
 let _google: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 let _anthropic: ReturnType<typeof createAnthropic> | null = null;
+let _openai: ReturnType<typeof createOpenAI> | null = null;
 let _openrouter: ReturnType<typeof createOpenRouter> | null = null;
+let _opencodezen: ReturnType<typeof createOpenAI> | null = null;
 let _cloudflareGoogle: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 let _cloudflareAnthropic: ReturnType<typeof createAnthropic> | null = null;
 let _litellm: ReturnType<typeof createOpenAI> | null = null;
@@ -45,6 +48,20 @@ function getAnthropicProvider() {
     });
   }
   return _anthropic;
+}
+
+function getOpenAIProvider() {
+  if (!_openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new ConfigurationError(
+        "OPENAI_API_KEY isn't set. Add it to your environment (for example: export OPENAI_API_KEY=your_key), or use a gateway by calling configure({ ai: { gateway: 'vercel' } }) with AI_GATEWAY_API_KEY, or configure({ ai: { gateway: 'openrouter' } }) with OPENROUTER_API_KEY. See .env.example for reference.",
+      );
+    }
+    _openai = createOpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return _openai;
 }
 
 function getOpenRouterProvider() {
@@ -173,6 +190,29 @@ function resolveLiteLLMModelId(modelId: string): string {
 }
 
 /**
+ * Maps canonical model IDs (provider/model) to OpenCode Zen model IDs.
+ * Zen strips the provider prefix and uses its own naming for some models.
+ */
+const OPENCODEZEN_MODEL_ALIASES: Record<string, string> = {
+  "google/gemini-3.1-pro-preview": "gemini-3.1-pro",
+  "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
+  "anthropic/claude-haiku-4-5": "claude-haiku-4-5",
+  "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
+  "anthropic/claude-sonnet-4-6": "claude-sonnet-4-6",
+  "anthropic/claude-opus-4.7": "claude-opus-4-7",
+  "anthropic/claude-opus-4-7": "claude-opus-4-7",
+};
+
+function resolveOpenCodeZenModelId(modelId: string): string {
+  if (OPENCODEZEN_MODEL_ALIASES[modelId]) {
+    return OPENCODEZEN_MODEL_ALIASES[modelId];
+  }
+  // Strip provider prefix: "google/gemini-3-flash" → "gemini-3-flash"
+  const slashIndex = modelId.indexOf("/");
+  return slashIndex !== -1 ? modelId.slice(slashIndex + 1) : modelId;
+}
+
+/**
  * Resolves a canonical model ID to a LanguageModel instance wrapped with Axiom instrumentation.
  * Input format: "provider/model-name" (e.g. "google/gemini-3-flash")
  *
@@ -187,9 +227,14 @@ function resolveLiteLLMModelId(modelId: string): string {
  * like Gemini's thought_signature pass through unchanged.
  * When gateway is "none" (default), creates a direct provider instance with alias resolution.
  * All paths wrap the model with wrapAISDKModel for tracing when Axiom is enabled.
+ *
+ * @param modelId - Canonical model id, e.g. "google/gemini-3-flash".
+ * @param gatewayOverride - Optional resolved gateway for this call. When omitted,
+ *   falls back to the global `configure()` value. Pass this when a per-step or
+ *   per-call `ai` override changes the gateway for a single resolution.
  */
-export function resolveModel(modelId: string): LanguageModel {
-  const gatewayConfig = getConfig().ai?.gateway ?? "none";
+export function resolveModel(modelId: string, gatewayOverride?: AIGateway): LanguageModel {
+  const gatewayConfig = gatewayOverride ?? getConfig().ai?.gateway ?? "none";
 
   if (gatewayConfig === "vercel") {
     if (!process.env.AI_GATEWAY_API_KEY) {
@@ -229,6 +274,8 @@ export function resolveModel(modelId: string): LanguageModel {
       return wrapModel(getGoogleProvider()(resolveDirectModelName(modelName)));
     case "anthropic":
       return wrapModel(getAnthropicProvider()(resolveDirectModelName(modelName)));
+    case "openai":
+      return wrapModel(getOpenAIProvider()(resolveDirectModelName(modelName)));
     default:
       throw new AIModelError(`Unknown AI provider: ${provider}`);
   }

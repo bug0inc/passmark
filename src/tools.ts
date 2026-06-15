@@ -4,7 +4,7 @@ import { Locator, type Page } from "@playwright/test";
 import { wrapTool } from "axiom/ai";
 import shortid from "shortid";
 import { getConfig } from "./config";
-import { axiomEnabled } from "./instrumentation";
+import { isAxiomEnabled } from "./instrumentation";
 import { logger } from "./logger";
 import { LOCATOR_ACTION_TIMEOUT, SNAPSHOT_TIMEOUT, STOP_DELAY } from "./constants";
 import {
@@ -15,6 +15,12 @@ import {
   TestType,
 } from "@playwright/test";
 import type { TabManager } from "./utils/tab-manager";
+
+export function resolveUploadPath(filePath: string, uploadBasePath: string): string {
+  return filePath.startsWith("/") || filePath.match(/^[A-Za-z]:/)
+    ? filePath
+    : `${uploadBasePath}/${filePath}`;
+}
 
 type ToolSettings = {
   abortController?: AbortController;
@@ -30,11 +36,15 @@ type ToolSettings = {
   tabManager?: TabManager;
 };
 
-// Only wrap tools with Axiom instrumentation when Axiom is configured
-const maybeWrapTool: typeof wrapTool = axiomEnabled ? wrapTool : <T>(_name: string, t: T): T => t;
-
 export function getAItools(page: Page, settings?: ToolSettings) {
   const playwrightTools = new PlaywrightTools(page, settings);
+
+  // Only wrap tools with Axiom instrumentation when Axiom is configured.
+  // Resolved per-call so users who call `configure({ telemetry })` before
+  // `runSteps` (rather than setting env vars) still get instrumentation.
+  const maybeWrapTool: typeof wrapTool = isAxiomEnabled()
+    ? wrapTool
+    : <T>(_name: string, t: T): T => t;
 
   const withSnapshot = async <TArgs, TResult>(
     fn: (args: TArgs) => Promise<TResult>,
@@ -476,13 +486,9 @@ class PlaywrightTools {
     reasoning: z.string().describe("A quick one-line reasoning behind this action"),
   });
   public async stop(_: z.infer<typeof this.stopSchema>) {
-    const DELAY = STOP_DELAY; // 3 seconds
     // brief sleep to ensure any ongoing navigation or actions are complete
-    // In future we could add graceful stop logic here
-    await new Promise((resolve) => setTimeout(resolve, DELAY));
-    if (this.abortController) {
-      this.abortController.abort();
-    }
+    // before the agent loop terminates via the `hasToolCall("browser_stop")` stop condition
+    await new Promise((resolve) => setTimeout(resolve, STOP_DELAY));
     return { success: true, message: "Execution stopped" };
   }
 
@@ -559,7 +565,11 @@ class PlaywrightTools {
   public uploadFileSchema = z.object({
     ref: z.string().describe('The ref of the "button" that triggers a FileChooser to upload files'),
     elementDescription: z.string().describe("A description of the element, used for debugging"),
-    filePaths: z.array(z.string()).describe("Array of absolute file paths to upload"),
+    filePaths: z
+      .array(z.string())
+      .describe(
+        "Array of file paths to upload. Can be absolute paths (e.g., '/tmp/file.png') or relative paths (e.g., 'document.pdf' which will be resolved against uploadBasePath)",
+      ),
     reasoning: z.string().describe("A quick one-line reasoning behind this action"),
     doesActionAdvanceUsTowardsGoal: z
       .boolean()
@@ -570,13 +580,13 @@ class PlaywrightTools {
   public async uploadFile({
     ref,
     elementDescription,
-    filePaths, // This is not a full path. It accepts a string filename which should be available in `uploads` directory
+    filePaths,
   }: z.infer<typeof this.uploadFileSchema>) {
     const locator = this.page.locator(`aria-ref=${ref}`).describe(elementDescription);
 
     // We expect to find these files in the `./uploads` directory if no base path is configured
     const uploadBasePath = getConfig().uploadBasePath || "./uploads";
-    const prefixedFilePaths = filePaths.map((filePath) => `${uploadBasePath}/${filePath}`);
+    const prefixedFilePaths = filePaths.map((filePath) => resolveUploadPath(filePath, uploadBasePath));
 
     // File uploads are not cached for now as it needs a two step process
     // We can solve this later by introducing multi-action caching if needed
