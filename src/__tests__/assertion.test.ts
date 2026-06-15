@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Disable Axiom instrumentation
-vi.mock("../instrumentation", () => ({ axiomEnabled: false }));
+vi.mock("../instrumentation", () => ({
+  isAxiomEnabled: () => false,
+  initTelemetry: vi.fn(),
+}));
 
 // Mock models.resolveModel to return the model id string so our AI mock can
 // branch based on the model identifier.
@@ -33,6 +36,7 @@ vi.mock("../utils", () => ({
 }));
 
 import { assert } from "../assertion";
+import { configure, resetConfig } from "../config";
 import { withTimeout } from "../utils";
 import { generateText } from "ai";
 
@@ -82,6 +86,7 @@ function makeGenerateTextImpl(opts: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetConfig();
 });
 
 describe("assert consensus logic", () => {
@@ -228,5 +233,81 @@ describe("assert consensus logic", () => {
     });
 
     expect(res).toContain("✅ passed");
+  });
+});
+
+describe("consensusPolicy", () => {
+  it('fails on disagreement when policy is "fail-on-disagreement" and skips the arbiter', async () => {
+    configure({ assertions: { consensusPolicy: "fail-on-disagreement" } });
+
+    const page = createMockPage();
+    let arbiterCalled = false;
+
+    vi.mocked(generateText).mockImplementation((async (args: any) => {
+      const model = String(args.model ?? "");
+      const wantsStructured = Boolean(args.output);
+      if (!wantsStructured) return { text: "claude text" } as any;
+      if (model.includes("anthropic")) {
+        return { output: { assertionPassed: true, confidenceScore: 90, reasoning: "Claude says pass" } } as any;
+      }
+      if (model.includes("3.1-pro-preview")) {
+        arbiterCalled = true;
+        return { output: { assertionPassed: true, confidenceScore: 80, reasoning: "Arbiter should NOT be called" } } as any;
+      }
+      if (model.includes("gemini-3-flash")) {
+        return { output: { assertionPassed: false, confidenceScore: 70, reasoning: "Gemini says fail" } } as any;
+      }
+      return { output: { assertionPassed: false, confidenceScore: 0, reasoning: "unknown" } } as any;
+    }) as any);
+
+    const res = await assert({
+      page,
+      assertion: "The page shows 3 items",
+      test: mockTest,
+      expect: ((a: unknown, _m?: string) => ({ toBe: (_v: unknown) => {} })) as any,
+      failSilently: true,
+      maxRetries: 0, // skip the outer retry loop so we observe a single attempt
+    });
+
+    expect(arbiterCalled).toBe(false);
+    expect(res).toContain("❌ failed");
+    expect(res).toContain("Claude says pass");
+    expect(res).toContain("Gemini says fail");
+    expect(res).toContain("fail-on-disagreement");
+  });
+
+  it("still consults the arbiter on disagreement when policy is the default", async () => {
+    // No configure() — should use default "consult-arbiter-on-disagreement"
+    const page = createMockPage();
+    let arbiterCalled = false;
+
+    vi.mocked(generateText).mockImplementation((async (args: any) => {
+      const model = String(args.model ?? "");
+      const wantsStructured = Boolean(args.output);
+      if (!wantsStructured) return { text: "claude text" } as any;
+      if (model.includes("anthropic")) {
+        return { output: { assertionPassed: true, confidenceScore: 90, reasoning: "Claude says pass" } } as any;
+      }
+      if (model.includes("3.1-pro-preview")) {
+        arbiterCalled = true;
+        return { output: { assertionPassed: true, confidenceScore: 75, reasoning: "Arbiter: pass" } } as any;
+      }
+      if (model.includes("gemini-3-flash")) {
+        return { output: { assertionPassed: false, confidenceScore: 70, reasoning: "Gemini says fail" } } as any;
+      }
+      return { output: { assertionPassed: false, confidenceScore: 0, reasoning: "unknown" } } as any;
+    }) as any);
+
+    const res = await assert({
+      page,
+      assertion: "The page shows 3 items",
+      test: mockTest,
+      expect: ((a: unknown, _m?: string) => ({ toBe: (_v: unknown) => {} })) as any,
+      failSilently: true,
+    });
+
+    expect(arbiterCalled).toBe(true);
+    expect(res).toContain("✅ passed");
+    expect(res).toContain("Arbiter: pass");
   });
 });

@@ -1,5 +1,4 @@
 import { StepExecutionError, ValidationError } from "./errors";
-import "./instrumentation"; // For Axiom AI instrumentation
 
 import {
   PlaywrightTestArgs,
@@ -8,15 +7,15 @@ import {
   PlaywrightWorkerOptions,
   TestType,
 } from "@playwright/test";
-import { generateText, Output, stepCountIs } from "ai";
+import { generateText, hasToolCall, Output, stepCountIs } from "ai";
 import { withSpan } from "axiom/ai";
 import shortid from "shortid";
-import { axiomEnabled } from "./instrumentation";
+import { initTelemetry, isAxiomEnabled } from "./instrumentation";
 
 import { maybeWithSpan } from "./utils/telemetry";
 import { z } from "zod";
 import { buildRunStepsPrompt, buildRunUserFlowPrompt } from "./prompts";
-import { redis } from "./redis";
+import { getRedis } from "./redis";
 import { getAItools } from "./tools";
 import { RunStepsOptions, UserFlowOptions } from "./types";
 import {
@@ -28,6 +27,7 @@ import {
 } from "./utils";
 
 import { assert } from "./assertion";
+import { VideoRecorder } from "./video";
 import {
   getDynamicEmail,
   processPlaceholders,
@@ -36,7 +36,7 @@ import {
 } from "./data-cache";
 import { resolveAI } from "./config";
 import { runCUALoop, buildRunStepsPromptCUA, buildRunUserFlowPromptCUA } from "./cua";
-import { extractDataWithAI } from "./extract";
+import { applyExtraction } from "./extract";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
 export * from "./visual";
@@ -103,10 +103,15 @@ export const runSteps = async ({
 }: RunStepsOptions) => {
   executionId = executionId || process.env.executionId;
 
+  // Initialize Axiom telemetry now that any user `configure()` call has run.
+  // Idempotent — re-entry is a no-op.
+  initTelemetry();
+
   // Track all open tabs for this run. The active page is updated automatically
   // when a new tab opens, or explicitly via the `switchToTab` step field.
   const tabManager = createTabManager(page);
 
+  const redis = getRedis();
   if (!redis) {
     logger.warn(
       "Redis not configured. Step caching is disabled — all steps will use AI execution.",
@@ -132,6 +137,24 @@ export const runSteps = async ({
     await processPlaceholders(steps, assertions, executionId, projectId);
 
   logger.info(`Starting step-by-step execution of ${processedSteps.length} steps.`);
+
+  // If any assertion opted into video evaluation, record a single screencast
+  // spanning the full step run. One recording is shared across all video
+  // assertions in this call; cleanup happens in a finally block below.
+  const needsVideo = processedAssertions?.some((a) => a.video) ?? false;
+  let videoRecorder: VideoRecorder | undefined;
+  if (needsVideo) {
+    videoRecorder = new VideoRecorder(tabManager.active());
+    try {
+      await videoRecorder.start();
+    } catch (error) {
+      logger.warn(
+        { err: error },
+        "Failed to start screencast — video assertions will fall back to screenshot/snapshot.",
+      );
+      videoRecorder = undefined;
+    }
+  }
 
   let errorInStepExecution,
     stepThatFailed: string = "";
@@ -237,16 +260,13 @@ export const runSteps = async ({
         // Handle data extraction if specified
         // This is done post script execution
         if (step.extract) {
-          const snapshot = await safeSnapshot(tabManager);
-          const url = tabManager.active().url();
-          const extracted = await extractDataWithAI({
-            snapshot,
-            url,
-            prompt: step.extract.prompt,
+          await applyExtraction({
+            extract: step.extract,
+            tabManager,
+            localValues,
+            globalValues,
+            executionId,
           });
-          const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-          (localValues as Record<string, string>)[placeholderKey] = extracted;
-          logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
         }
 
         if (onStepEnd) {
@@ -315,16 +335,13 @@ export const runSteps = async ({
       }
 
       if (step.extract) {
-        const snapshot = await safeSnapshot(tabManager);
-        const url = tabManager.active().url();
-        const extracted = await extractDataWithAI({
-          snapshot,
-          url,
-          prompt: step.extract.prompt,
+        await applyExtraction({
+          extract: step.extract,
+          tabManager,
+          localValues,
+          globalValues,
+          executionId,
         });
-        const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-        (localValues as Record<string, string>)[placeholderKey] = extracted;
-        logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
       }
 
       if (onStepEnd) {
@@ -420,16 +437,13 @@ export const runSteps = async ({
         // Handle data extraction if specified
         // This is done post cached step execution
         if (step.extract) {
-          const snapshot = await safeSnapshot(tabManager);
-          const url = tabManager.active().url();
-          const extracted = await extractDataWithAI({
-            snapshot,
-            url,
-            prompt: step.extract.prompt,
+          await applyExtraction({
+            extract: step.extract,
+            tabManager,
+            localValues,
+            globalValues,
+            executionId,
           });
-          const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-          (localValues as Record<string, string>)[placeholderKey] = extracted;
-          logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
         }
         continue;
       } catch (error) {
@@ -497,7 +511,7 @@ export const runSteps = async ({
                 });
               });
             },
-            stopWhen: stepCountIs(STEP_EXECUTION_MAX_STEPS),
+            stopWhen: [stepCountIs(STEP_EXECUTION_MAX_STEPS), hasToolCall("browser_stop")],
             abortSignal: AbortSignal.timeout(STEP_EXECUTION_TIMEOUT),
             toolChoice: "auto",
             prompt: buildRunStepsPrompt({
@@ -550,16 +564,13 @@ export const runSteps = async ({
     // Handle data extraction if specified
     // This is done post AI step execution
     if (step.extract) {
-      const snapshot = await safeSnapshot(tabManager);
-      const url = tabManager.active().url();
-      const extracted = await extractDataWithAI({
-        snapshot,
-        url,
-        prompt: step.extract.prompt,
+      await applyExtraction({
+        extract: step.extract,
+        tabManager,
+        localValues,
+        globalValues,
+        executionId,
       });
-      const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-      (localValues as Record<string, string>)[placeholderKey] = extracted;
-      logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
     }
 
     if (onStepEnd) {
@@ -578,51 +589,85 @@ export const runSteps = async ({
       });
     }
 
+    // Stop & delete the recording before re-throwing so we don't leak a
+    // running screencast or a temp file when steps fail mid-flow.
+    if (videoRecorder) {
+      await videoRecorder.stop();
+      await videoRecorder.cleanup();
+    }
+
     throw new StepExecutionError(errorDescription, stepThatFailed);
   }
 
-  if (processedAssertions && processedAssertions.length > 0 && expect) {
-    for (const { assertion, effort, images } of processedAssertions) {
-      logger.info(`Running assertion: ${assertion}`);
+  // Stop recording (if any) before running assertions so the saved file is
+  // ready to upload. Cleanup of the file happens in the finally below.
+  if (videoRecorder) {
+    await videoRecorder.stop();
+  }
 
-      const id = shortid.generate();
-
-      if (onStepStart) {
-        onStepStart({
-          id,
-          description: "Starting assertion verification",
-        });
-      }
-
-      if (onReasoning) {
-        onReasoning({
-          id,
-          reasoning: `Verifying assertion: ${assertion}`,
-        });
-      }
-
-      const reasoning = await assert({
-        page: tabManager,
-        assertion,
-        test,
-        expect,
+  try {
+    if (processedAssertions && processedAssertions.length > 0 && expect) {
+      for (const {
+        assertion: preProcessedAssertion,
         effort,
         images,
-        failSilently: failAssertionsSilently,
-        maxRetries: 1,
-        onRetry: (retryCount, previousResult) => {},
-      });
+        video,
+      } of processedAssertions) {
+        // Re-resolve placeholders against the latest localValues so extracted
+        // values from steps (e.g. {{run.emailContent}}) get substituted in.
+        const assertion = replacePlaceholders(
+          preProcessedAssertion,
+          localValues,
+          globalValues,
+          projectDataValues,
+        );
+        logger.info(`Running assertion: ${assertion}`);
 
-      if (onReasoning) {
-        onReasoning({
-          id,
-          reasoning: `\n\n${reasoning}`,
+        const id = shortid.generate();
+
+        if (onStepStart) {
+          onStepStart({
+            id,
+            description: "Starting assertion verification",
+          });
+        }
+
+        if (onReasoning) {
+          onReasoning({
+            id,
+            reasoning: `Verifying assertion: ${assertion}`,
+          });
+        }
+
+        const reasoning = await assert({
+          page: tabManager,
+          assertion,
+          test,
+          expect,
+          effort,
+          images,
+          failSilently: failAssertionsSilently,
+          maxRetries: 1,
+          onRetry: (retryCount, previousResult) => {},
+          video: video && Boolean(videoRecorder),
+          videoFilePath: videoRecorder?.filePath,
         });
-      }
 
-      if (onStepEnd) {
-        onStepEnd({ id, description: "Successfully verified assertion" });
+        if (onReasoning) {
+          onReasoning({
+            id,
+            reasoning: `\n\n${reasoning}`,
+          });
+        }
+
+        if (onStepEnd) {
+          onStepEnd({ id, description: "Successfully verified assertion" });
+        }
       }
+    }
+  } finally {
+    if (videoRecorder) {
+      await videoRecorder.cleanup();
     }
   }
 };
@@ -741,7 +786,7 @@ export const runUserFlow = async ({
               },
             },
           },
-          stopWhen: stepCountIs(USER_FLOW_MAX_STEPS),
+          stopWhen: [stepCountIs(USER_FLOW_MAX_STEPS), hasToolCall("browser_stop")],
           abortSignal: abortController.signal,
           prepareStep: async ({ messages }) => {
             // Remove older messages to keep the context window small

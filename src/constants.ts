@@ -25,3 +25,11 @@ export const THINKING_BUDGET_DEFAULT = 1024;
 
 // Redis
 export const GLOBAL_VALUES_TTL_SECONDS = 86400;
+
+// Video assertions
+export const VIDEO_DEFAULT_DIR = "/tmp/passmark-recordings";
+export const VIDEO_DEFAULT_WIDTH = 1280;
+export const VIDEO_DEFAULT_HEIGHT = 720;
+export const VIDEO_FILE_POLL_INTERVAL = 1500;
+export const VIDEO_FILE_POLL_TIMEOUT = 120000;
+export const VIDEO_ASSERTION_MODEL = "gemini-3-flash-preview";

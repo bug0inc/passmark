@@ -1,6 +1,6 @@
 import { generateText, ModelMessage, Output } from "ai";
 import { z } from "zod";
-import { getModelId } from "./config";
+import { getConsensusPolicy, getModelId } from "./config";
 import { ASSERTION_MODEL_TIMEOUT, THINKING_BUDGET_DEFAULT } from "./constants";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
@@ -57,9 +57,49 @@ export const assert = async ({
   images,
   failSilently,
   maxRetries = 1,
-  onRetry = (retryCount: number, previousResult: AssertionResult) => {},
+  onRetry = (retryCount: number, previousResult: AssertionResult) => { },
+  video,
+  videoFilePath,
 }: AssertionOptions): Promise<string> => {
   const thinkingEnabled = effort === "high";
+
+  // Video assertion path: when a recorded video is provided, evaluate the
+  // assertion against the full video using a video-capable Gemini model.
+  // Consensus isn't available here (Claude doesn't accept video), so this is
+  // a single-model call. The screenshot/snapshot path below is unchanged.
+  if (video && videoFilePath) {
+    logger.debug({ assertion, videoFilePath }, "Running video assertion path");
+    const runVideoAssertion = async (): Promise<AssertionResult> => {
+      const file = await uploadVideoToGemini(videoFilePath);
+      try {
+        return await assertVideoFile({
+          assertion,
+          fileUri: file.uri,
+          fileMimeType: file.mimeType,
+        });
+      } finally {
+        await deleteGeminiFile(file.name);
+      }
+    };
+
+    let videoResult = await runVideoAssertion();
+    for (let retry = 0; retry < maxRetries && !videoResult.assertionPassed; retry++) {
+      logger.debug("Video assertion failed, retrying...");
+      onRetry(retry, videoResult);
+      videoResult = await runVideoAssertion();
+    }
+
+    test?.info().annotations.push({
+      type: "AI Summary (video analysis)",
+      description: videoResult.reasoning,
+    });
+
+    const status = videoResult.assertionPassed ? "✅ passed" : "❌ failed";
+    if (!failSilently) {
+      expect(videoResult.assertionPassed, videoResult.reasoning).toBe(true);
+    }
+    return `${videoResult.reasoning}\n\n[Assertion ${status}]`;
+  }
 
   const runFullAssertion = async (): Promise<AssertionResult> => {
     const snapshot = await safeSnapshot(page);
@@ -291,6 +331,26 @@ Please carefully review the evidence (screenshot and accessibility snapshot (whe
 
         // Check if models disagree on assertionPassed
         if (claudeResult.assertionPassed !== geminiResult.assertionPassed) {
+          const policy = getConsensusPolicy();
+
+          if (policy === "fail-on-disagreement") {
+            logger.debug(
+              "Models disagree on assertion result; failing per consensusPolicy=fail-on-disagreement.",
+            );
+            const lower = Math.min(
+              claudeResult.confidenceScore,
+              geminiResult.confidenceScore,
+            );
+            return {
+              assertionPassed: false,
+              confidenceScore: Math.round(lower),
+              reasoning:
+                `Assertion failed: models disagreed and consensusPolicy is "fail-on-disagreement".\n` +
+                `Claude (passed=${claudeResult.assertionPassed}, ${claudeResult.confidenceScore}%): ${claudeResult.reasoning}\n` +
+                `Gemini (passed=${geminiResult.assertionPassed}, ${geminiResult.confidenceScore}%): ${geminiResult.reasoning}`,
+            };
+          }
+
           logger.debug("Models disagree on assertion result, consulting arbiter...");
           const arbiterResult = await withTimeout(
             getArbiterDecision(claudeResult, geminiResult),
