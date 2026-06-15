@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../cache", () => ({
-  cache: { hgetall: vi.fn(), hset: vi.fn(), expire: vi.fn() },
+  getCache: () => ({ hgetall: vi.fn(), hset: vi.fn(), expire: vi.fn() }),
 }));
 
 vi.mock("../email", () => ({

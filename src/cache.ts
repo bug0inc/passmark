@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { getRedis } from "./redis";
 
 // =============================================================================
 // Cache Store Interface
@@ -14,17 +15,21 @@ export interface CacheStore {
   expire(key: string, seconds: number): Promise<void>;
 }
 
+type RedisClient = NonNullable<ReturnType<typeof getRedis>>;
+
 // =============================================================================
 // Redis Store
 // =============================================================================
 
+/**
+ * Backs the cache with the memoized Redis client from `getRedis()`, which
+ * reads `configure({ redis: { url } })` first and falls back to `REDIS_URL`.
+ */
 class RedisStore implements CacheStore {
-  private client: import("ioredis").default;
+  private client: RedisClient;
 
-  constructor(url: string) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Redis = require("ioredis") as typeof import("ioredis").default;
-    this.client = new Redis(url);
+  constructor(client: RedisClient) {
+    this.client = client;
   }
 
   async hgetall(key: string): Promise<Record<string, string>> {
@@ -47,6 +52,10 @@ class RedisStore implements CacheStore {
 import * as fs from "fs";
 import * as path from "path";
 
+/**
+ * Backs the cache with JSON files on disk. Useful for committing a warm cache
+ * to Git so CI runs can reuse cached steps without a Redis server.
+ */
 class FileStore implements CacheStore {
   private dir: string;
 
@@ -109,52 +118,56 @@ class FileStore implements CacheStore {
 // Factory
 // =============================================================================
 
+let cacheInstance: CacheStore | null = null;
+let initialized = false;
+
 /**
- * Creates the cache store based on environment variables.
+ * Returns a memoized cache store based on the `CACHE_PROVIDER` env var:
+ *   - "redis" (also the default): uses Redis via `getRedis()`, which honors
+ *     `configure({ redis: { url } })` and `REDIS_URL`.
+ *   - "file": uses JSON files on disk at `CACHE_DIR` (defaults to
+ *     `.passmark-cache`). Handy for committing a warm cache to Git for CI.
+ *   - "none": disables caching entirely.
  *
- * CACHE_PROVIDER selects the backend:
- *   - "redis" (default when REDIS_URL is set): uses Redis via ioredis
- *   - "file": uses JSON files on disk at CACHE_DIR (defaults to .passmark-cache)
- *   - "none": disables caching entirely
+ * Returns null when caching is disabled or no Redis URL is configured, which
+ * disables step caching, {{global.*}} placeholders, and project data.
  *
- * For backwards compatibility, if CACHE_PROVIDER is not set:
- *   - If REDIS_URL is set → uses Redis
- *   - Otherwise → caching is disabled (null)
+ * Lazy: resolved on first call so users can call `configure()` beforehand.
  */
-function createCacheStore(): CacheStore | null {
+export function getCache(): CacheStore | null {
+  if (initialized) return cacheInstance;
+  initialized = true;
+
   const provider = process.env.CACHE_PROVIDER?.toLowerCase();
 
   if (provider === "none") {
-    logger.warn("Cache provider set to 'none'. Caching is disabled.");
-    return null;
+    logger.warn("CACHE_PROVIDER is 'none'. Caching is disabled.");
+    cacheInstance = null;
+    return cacheInstance;
   }
 
   if (provider === "file") {
     const dir = process.env.CACHE_DIR || ".passmark-cache";
     logger.info(`Using file-based cache at: ${dir}`);
-    return new FileStore(dir);
+    cacheInstance = new FileStore(dir);
+    return cacheInstance;
   }
 
-  if (provider === "redis" || (!provider && process.env.REDIS_URL)) {
-    if (!process.env.REDIS_URL) {
-      logger.warn("CACHE_PROVIDER is 'redis' but REDIS_URL is not set. Caching is disabled.");
-      return null;
-    }
-    logger.info("Using Redis cache.");
-    return new RedisStore(process.env.REDIS_URL);
-  }
-
-  if (provider) {
+  if (provider && provider !== "redis") {
     logger.warn(`Unknown CACHE_PROVIDER '${provider}'. Caching is disabled.`);
-    return null;
+    cacheInstance = null;
+    return cacheInstance;
   }
 
-  // No CACHE_PROVIDER and no REDIS_URL
-  logger.warn(
-    "No cache provider configured. Set CACHE_PROVIDER=redis|file|none or REDIS_URL. " +
-      "Step caching, global placeholders, and project data are disabled.",
-  );
-  return null;
+  // Default ("redis" or unset): use the configured Redis client. getRedis()
+  // already warns when no URL is set.
+  const redis = getRedis();
+  cacheInstance = redis ? new RedisStore(redis) : null;
+  return cacheInstance;
 }
 
-export const cache: CacheStore | null = createCacheStore();
+/** @internal Reset the memoized cache store. Used for testing only. */
+export function resetCache() {
+  cacheInstance = null;
+  initialized = false;
+}

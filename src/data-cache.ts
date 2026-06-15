@@ -4,7 +4,7 @@ import { getConfig } from "./config";
 import { extractEmailContent } from "./email";
 import { GLOBAL_VALUES_TTL_SECONDS } from "./constants";
 import { logger } from "./logger";
-import { cache } from "./cache";
+import { getCache } from "./cache";
 import { Step } from "./types";
 import { generatePhoneNumber } from "./utils";
 
@@ -22,6 +22,9 @@ export type LocalPlaceholders = {
   "{{run.email}}": string;
   "{{run.dynamicEmail}}": string;
   "{{run.phoneNumber}}": string;
+} & {
+  // Values extracted at runtime via `extract` with scope "local" are stored as {{run.<as>}}.
+  [key: string]: string;
 };
 
 /**
@@ -35,6 +38,9 @@ export type GlobalPlaceholders = {
   "{{global.email}}": string;
   "{{global.dynamicEmail}}": string;
   "{{global.phoneNumber}}": string;
+} & {
+  // Values extracted at runtime via `extract` with scope "global" are stored as {{global.<as>}}.
+  [key: string]: string;
 };
 
 /**
@@ -47,6 +53,12 @@ export type AssertionItem = {
   assertion: string;
   effort?: "low" | "high";
   images?: string[];
+  /**
+   * When true, `runSteps` records a video while executing the surrounding
+   * steps and passes it to the assertion for evaluation. Useful for
+   * ephemeral UI like toasts that a screenshot may miss.
+   */
+  video?: boolean;
 };
 
 export type ProcessPlaceholdersResult = {
@@ -112,6 +124,7 @@ function getCacheKey(executionId: string): string {
 export async function getGlobalValues(
   executionId: string,
 ): Promise<Partial<GlobalPlaceholders> | null> {
+  const cache = getCache();
   if (!cache) return null;
   const key = getCacheKey(executionId);
   const values = await cache.hgetall(key);
@@ -131,6 +144,7 @@ export async function saveGlobalValues(
   executionId: string,
   values: GlobalPlaceholders,
 ): Promise<void> {
+  const cache = getCache();
   if (!cache) return;
 
   const key = getCacheKey(executionId);
@@ -160,6 +174,7 @@ function getProjectDataCacheKey(projectId: string): string {
  * Returns an empty object if no data exists.
  */
 export async function getProjectData(projectId: string): Promise<ProjectDataPlaceholders> {
+  const cache = getCache();
   if (!cache) return {};
   const key = getProjectDataCacheKey(projectId);
   const values = await cache.hgetall(key);
@@ -205,6 +220,8 @@ export async function generateGlobalValues(
   const emailDomain = getConfig().email?.domain;
 
   return {
+    // Preserve any runtime-extracted {{global.<as>}} values so they survive across runSteps calls.
+    ...(existingValues ?? {}),
     "{{global.shortid}}": existingValues?.["{{global.shortid}}"] ?? shortid.generate(),
     "{{global.fullName}}": existingValues?.["{{global.fullName}}"] ?? faker.person.fullName(),
     "{{global.email}}": existingValues?.["{{global.email}}"] ?? faker.internet.email(),
@@ -401,6 +418,16 @@ export async function processPlaceholders(
     throw new ValidationError(
       "{{global.*}} placeholders require an executionId. " +
       "Please provide executionId in runSteps options to use global placeholders.",
+    );
+  }
+
+  // Check if any step extracts into the global scope without an executionId
+  const hasGlobalExtract = steps.some((step) => step.extract?.scope === "global");
+
+  if (hasGlobalExtract && !executionId) {
+    throw new ValidationError(
+      'extract with scope "global" requires an executionId. ' +
+        "Please provide executionId in runSteps options to extract values into the global scope.",
     );
   }
 
