@@ -1,34 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mailinatorProvider } from "../../providers/mailinator";
 
-// This replaces the real fetch with a fake one
-// No real API calls are made — zero cost, zero internet needed
 vi.stubGlobal("fetch", vi.fn());
 
 describe("mailinatorProvider", () => {
-
-  // Reset the fake fetch before each test
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  // ✅ Test 1 — basic structure
   it("returns correct domain", () => {
     const provider = mailinatorProvider();
     expect(provider.domain).toBe("mailinator.com");
   });
 
-  // ✅ Test 2 — happy path, email arrives and OTP extracted
   it("extracts email body successfully", async () => {
     const fetchMock = vi.fn()
-      // first fetch call → inbox list
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          msgs: [{ id: "msg-abc-123", subject: "Your OTP Code" }],
+          msgs: [{ id: "msg-abc-123" }],
         }),
       })
-      // second fetch call → full message content
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -44,20 +36,17 @@ describe("mailinatorProvider", () => {
       prompt: "get the 6 digit verification code",
     });
 
-    // result should contain the OTP
     expect(result).toContain("847291");
-    
-    // fetch should have been called exactly twice
+
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // ✅ Test 3 — works with API key in headers
   it("sends API key in headers when provided", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          msgs: [{ id: "msg-456", subject: "Reset Password" }],
+          msgs: [{ id: "msg-456" }],
         }),
       })
       .mockResolvedValueOnce({
@@ -75,14 +64,12 @@ describe("mailinatorProvider", () => {
       prompt: "get the reset link",
     });
 
-    // check first call had Authorization header
-    const firstCallHeaders = fetchMock.mock.calls[0][1].headers;
-    expect(firstCallHeaders).toEqual({
+    const inboxRequestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(inboxRequestHeaders).toEqual({
       Authorization: "Bearer my-test-api-key",
     });
   });
 
-  // ✅ Test 4 — no API key means no Authorization header
   it("sends no headers when no API key provided", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
@@ -100,21 +87,20 @@ describe("mailinatorProvider", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = mailinatorProvider(); // no API key
+    const provider = mailinatorProvider();
     await provider.extractContent({
       email: "test@mailinator.com",
       prompt: "get the code",
     });
 
-    const firstCallHeaders = fetchMock.mock.calls[0][1].headers;
-    expect(firstCallHeaders).toEqual({});
+    const inboxRequestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(inboxRequestHeaders ?? {}).toEqual({});
   });
 
-  // ✅ Test 5 — inbox is empty
   it("throws when inbox has no emails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ msgs: [] }),  // empty inbox
+      json: async () => ({ msgs: [] }),
     }));
 
     const provider = mailinatorProvider();
@@ -127,11 +113,10 @@ describe("mailinatorProvider", () => {
     ).rejects.toThrow("No emails found for nobody@mailinator.com");
   });
 
-  // ✅ Test 6 — API returns error
   it("throws when inbox API call fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
       ok: false,
-      status: 429,  // too many requests
+      status: 429,
     }));
 
     const provider = mailinatorProvider();
@@ -144,7 +129,30 @@ describe("mailinatorProvider", () => {
     ).rejects.toThrow("HTTP 429");
   });
 
-  // ✅ Test 7 — email body is empty
+  it("throws when message API call fails", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          msgs: [{ id: "msg-123" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      })
+    );
+
+    const provider = mailinatorProvider();
+
+    await expect(
+      provider.extractContent({
+        email: "test@mailinator.com",
+        prompt: "get the code",
+      })
+    ).rejects.toThrow("HTTP 500");
+  });
+
   it("throws when email body is empty", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce({
@@ -156,7 +164,7 @@ describe("mailinatorProvider", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          parts: [{ body: "" }],  // empty body
+          parts: [{ body: "" }],
         }),
       })
     );
@@ -170,5 +178,4 @@ describe("mailinatorProvider", () => {
       })
     ).rejects.toThrow("Email body is empty");
   });
-
 });
