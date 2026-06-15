@@ -34,7 +34,7 @@ describe("models", () => {
     expect(typeof model).toBe("object");
   });
 
-  it("remaps google prefixes to gemini for litellm", () => {
+  it("accepts model IDs when routing via litellm gateway", () => {
     configure({ ai: { gateway: "litellm" } });
     process.env.LITELLM_BASE_URL = "http://localhost:4000/v1";
     
