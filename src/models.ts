@@ -3,7 +3,6 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createOpenAI } from "@ai-sdk/openai";
 import { gateway, type LanguageModel } from "ai";
 import { wrapAISDKModel } from "axiom/ai";
 import { type AIGateway, getConfig } from "./config";
