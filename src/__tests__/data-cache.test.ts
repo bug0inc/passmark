@@ -155,15 +155,24 @@ describe("generateLocalValues", () => {
 // ─── getDynamicEmail ────────────────────────────────────────────────────────
 
 describe("getDynamicEmail", () => {
-  it("prefers global dynamicEmail over local", () => {
-    const globalValues: GlobalPlaceholders = {
-      "{{global.shortid}}": "g1",
-      "{{global.fullName}}": "Global User",
-      "{{global.email}}": "g@test.com",
-      "{{global.dynamicEmail}}": "global-dyn@test.com",
-      "{{global.phoneNumber}}": "0000000000",
-    };
-    expect(getDynamicEmail(localValues, globalValues)).toBe("global-dyn@test.com");
+  const globalValues: GlobalPlaceholders = {
+    "{{global.shortid}}": "g1",
+    "{{global.fullName}}": "Global User",
+    "{{global.email}}": "g@test.com",
+    "{{global.dynamicEmail}}": "global-dyn@test.com",
+    "{{global.phoneNumber}}": "0000000000",
+  };
+
+  it("returns global dynamicEmail when preferGlobal=true", () => {
+    expect(getDynamicEmail(localValues, globalValues, true)).toBe("global-dyn@test.com");
+  });
+
+  it("returns local dynamicEmail when preferGlobal=false even if global is set", () => {
+    expect(getDynamicEmail(localValues, globalValues, false)).toBe("dyn@test.com");
+  });
+
+  it("returns local dynamicEmail when preferGlobal defaults to false", () => {
+    expect(getDynamicEmail(localValues, globalValues)).toBe("dyn@test.com");
   });
 
   it("falls back to local dynamicEmail when global is not provided", () => {

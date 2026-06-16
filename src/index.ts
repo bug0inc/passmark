@@ -42,7 +42,7 @@ import {
 } from "./data-cache";
 import { resolveAI } from "./config";
 import { runCUALoop, buildRunStepsPromptCUA, buildRunUserFlowPromptCUA } from "./cua";
-import { extractDataWithAI } from "./extract";
+import { applyExtraction } from "./extract";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
 import { runSecureScript } from "./utils/secure-script-runner";
@@ -137,7 +137,7 @@ export const runSteps = async ({
   }
 
   // Process dynamic placeholders before running steps
-  const { processedSteps, processedAssertions, localValues, globalValues, projectDataValues } =
+  const { processedSteps, processedAssertions, localValues, globalValues, projectDataValues, hasGlobalPlaceholders } =
     await processPlaceholders(steps, assertions, executionId, projectId);
 
   logger.info(`Starting step-by-step execution of ${processedSteps.length} steps.`);
@@ -163,12 +163,10 @@ export const runSteps = async ({
   let errorInStepExecution,
     stepThatFailed: string = "";
   for (let i = 0; i < processedSteps.length; i++) {
-    // Resolve email placeholders lazily just before step execution
-    // This ensures the email has arrived before we try to extract content
-    // Use global email if available, otherwise fall back to run email, and then use the supplied email from regex
-
-    // ~~~ This logic needs to be fixed as global email will always be present if executionId is provided ~~~
-    const dynamicEmail = getDynamicEmail(localValues, globalValues);
+    // Resolve email placeholders lazily just before step execution.
+    // Only use the shared global email when these steps actually reference
+    // {{global.*}} placeholders;
+    const dynamicEmail = getDynamicEmail(localValues, globalValues, hasGlobalPlaceholders);
 
     // Re-process step data and waitUntil with current localValues to pick up extracted values from previous steps
     let currentStep = processedSteps[i];
@@ -264,16 +262,13 @@ export const runSteps = async ({
         // Handle data extraction if specified
         // This is done post script execution
         if (step.extract) {
-          const snapshot = await safeSnapshot(tabManager);
-          const url = tabManager.active().url();
-          const extracted = await extractDataWithAI({
-            snapshot,
-            url,
-            prompt: step.extract.prompt,
+          await applyExtraction({
+            extract: step.extract,
+            tabManager,
+            localValues,
+            globalValues,
+            executionId,
           });
-          const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-          (localValues as Record<string, string>)[placeholderKey] = extracted;
-          logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
         }
 
         if (onStepEnd) {
@@ -342,16 +337,13 @@ export const runSteps = async ({
       }
 
       if (step.extract) {
-        const snapshot = await safeSnapshot(tabManager);
-        const url = tabManager.active().url();
-        const extracted = await extractDataWithAI({
-          snapshot,
-          url,
-          prompt: step.extract.prompt,
+        await applyExtraction({
+          extract: step.extract,
+          tabManager,
+          localValues,
+          globalValues,
+          executionId,
         });
-        const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-        (localValues as Record<string, string>)[placeholderKey] = extracted;
-        logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
       }
 
       if (onStepEnd) {
@@ -447,16 +439,13 @@ export const runSteps = async ({
         // Handle data extraction if specified
         // This is done post cached step execution
         if (step.extract) {
-          const snapshot = await safeSnapshot(tabManager);
-          const url = tabManager.active().url();
-          const extracted = await extractDataWithAI({
-            snapshot,
-            url,
-            prompt: step.extract.prompt,
+          await applyExtraction({
+            extract: step.extract,
+            tabManager,
+            localValues,
+            globalValues,
+            executionId,
           });
-          const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-          (localValues as Record<string, string>)[placeholderKey] = extracted;
-          logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
         }
         continue;
       } catch (error) {
@@ -573,16 +562,13 @@ export const runSteps = async ({
     // Handle data extraction if specified
     // This is done post AI step execution
     if (step.extract) {
-      const snapshot = await safeSnapshot(tabManager);
-      const url = tabManager.active().url();
-      const extracted = await extractDataWithAI({
-        snapshot,
-        url,
-        prompt: step.extract.prompt,
+      await applyExtraction({
+        extract: step.extract,
+        tabManager,
+        localValues,
+        globalValues,
+        executionId,
       });
-      const placeholderKey = `{{run.${step.extract.as}}}` as keyof typeof localValues;
-      (localValues as Record<string, string>)[placeholderKey] = extracted;
-      logger.info(`Extracted {{run.${step.extract.as}}}: "${extracted}"`);
     }
 
     if (onStepEnd) {
@@ -660,7 +646,7 @@ export const runSteps = async ({
           images,
           failSilently: failAssertionsSilently,
           maxRetries: 1,
-          onRetry: (retryCount, previousResult) => {},
+          onRetry: (retryCount, previousResult) => { },
           video: video && Boolean(videoRecorder),
           videoFilePath: videoRecorder?.filePath,
         });

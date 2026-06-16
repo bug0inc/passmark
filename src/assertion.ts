@@ -1,6 +1,6 @@
 import { generateText, ModelMessage, Output } from "ai";
 import { z } from "zod";
-import { getModelId, getAssertionModelsList } from "./config";
+import { getModelId, getAssertionModelsList, getConsensusPolicy } from "./config";
 import { ASSERTION_MODEL_TIMEOUT, THINKING_BUDGET_DEFAULT } from "./constants";
 import { logger } from "./logger";
 import { resolveModel } from "./models";
@@ -412,6 +412,24 @@ Never hallucinate. Be truthful and if you are not sure, use a low confidence sco
         if (consensus.hasConsensus && consensus.consensusResult) {
           logger.debug(`All ${results.length} models agreed on assertion result`);
           return consensus.consensusResult;
+        }
+
+        const policy = getConsensusPolicy();
+        if (policy === "fail-on-disagreement") {
+          logger.debug(
+            "Models disagree on assertion result; failing per consensusPolicy=fail-on-disagreement.",
+          );
+          const lower = Math.min(...results.map(r => r.confidenceScore));
+          const reasons = modelResults.map(({ modelId, result }) => 
+            `${modelId} (passed=${result.assertionPassed}, ${result.confidenceScore}%): ${result.reasoning}`
+          ).join("\n");
+
+          return {
+            assertionPassed: false,
+            confidenceScore: Math.round(lower),
+            reasoning:
+              `Assertion failed: models disagreed and consensusPolicy is "fail-on-disagreement".\n${reasons}`,
+          };
         }
         
         // For 2 models with disagreement, use arbiter
