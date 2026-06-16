@@ -169,7 +169,7 @@ Set `OPENAI_API_KEY` whenever any step opts into `mode: "cua"`. CUA steps still 
 - **Core Execution** — `runSteps()` and `runUserFlow()` for flexible test orchestration in natural language, with smart caching and auto-healing
 - **Multi-Model Assertion Engine** — Consensus-based validation using Claude and Gemini, with an arbiter model to resolve disagreements
 - **Video Assertions** — Opt in per-assertion to record the full step run and evaluate the assertion against the whole video via Gemini's Files API. Useful for ephemeral UI (toasts, snackbars) that a single screenshot may miss
-- **Redis-Based Step Caching** — Cache-first execution with AI fallback and automatic self-healing when cached steps fail
+- **Pluggable Step Caching** — Cache-first execution with AI fallback and automatic self-healing. Backed by Redis or a file-based store (`CACHE_PROVIDER=redis|file|none`)
 - **Configurable AI Models** — 8 dedicated model slots for step execution, assertions, extraction, and more
 - **AI Gateway Support** — Route requests through Vercel AI Gateway, OpenRouter, Cloudflare AI Gateway, or connect directly to provider SDKs
 - **Dynamic Placeholders** — Inject values at runtime with `{{run.*}}`, `{{global.*}}`, `{{data.*}}`, and `{{email.*}}` expressions for repeatable and data-driven tests
@@ -297,6 +297,8 @@ configure({
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
+| `CACHE_PROVIDER` | No | `redis` | Cache backend: `redis`, `file`, or `none`. Defaults to Redis. |
+| `CACHE_DIR` | No | `.passmark-cache` | Directory for file-based cache (when `CACHE_PROVIDER=file`) |
 | `REDIS_URL` | No | - | Redis connection URL for step caching and global state. Can also be set via `configure({ redis: { url } })`, which takes precedence. |
 | `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude models |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | - | Google API key for Gemini models. Also required for `video: true` assertions regardless of gateway (file URIs are tied to the uploading account). |
@@ -328,7 +330,35 @@ All models are configurable via `configure({ ai: { models: { ... } } })`:
 
 ## Caching
 
-Passmark caches successful step actions in Redis. On subsequent runs, cached steps execute directly without AI calls, dramatically reducing latency and cost.
+Passmark caches successful step actions so that subsequent runs execute directly without AI calls, dramatically reducing latency and cost. The cache backend is pluggable — choose between Redis, file-based, or no caching at all.
+
+### Cache Providers
+
+Set the `CACHE_PROVIDER` environment variable to select a backend:
+
+| Provider | `CACHE_PROVIDER` | Additional Config | Description |
+|----------|-------------------|-------------------|-------------|
+| **Redis** | `redis` | `REDIS_URL` | Uses Redis via ioredis. Default when `REDIS_URL` is set. |
+| **File** | `file` | `CACHE_DIR` (optional, defaults to `.passmark-cache`) | JSON files on disk. No external dependencies — great for local development and CI. |
+| **None** | `none` | — | Disables caching entirely. Every step uses AI execution. |
+
+For backwards compatibility, if `CACHE_PROVIDER` is not set, Passmark will use Redis when `REDIS_URL` is present, otherwise caching is disabled.
+
+### Custom Cache Store
+
+You can implement a custom cache backend by conforming to the `CacheStore` interface:
+
+```typescript
+import { CacheStore } from "passmark";
+
+interface CacheStore {
+  hgetall(key: string): Promise<Record<string, string>>;
+  hset(key: string, values: Record<string, string>): Promise<void>;
+  expire(key: string, seconds: number): Promise<void>;
+}
+```
+
+### Caching Behavior
 
 Provide the connection via `configure({ redis: { url } })` or the `REDIS_URL` env var (configure value wins). Without either, caching, `{{global.*}}` placeholders, and project data are disabled.
 

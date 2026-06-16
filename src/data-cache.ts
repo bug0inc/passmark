@@ -4,7 +4,7 @@ import { getConfig } from "./config";
 import { extractEmailContent } from "./email";
 import { GLOBAL_VALUES_TTL_SECONDS } from "./constants";
 import { logger } from "./logger";
-import { getRedis } from "./redis";
+import { getCache } from "./cache";
 import { Step } from "./types";
 import { generatePhoneNumber } from "./utils";
 
@@ -29,7 +29,7 @@ export type LocalPlaceholders = {
 
 /**
  * Global placeholders that are shared across all tests within an execution.
- * These values are persisted to Redis and loaded for subsequent runSteps calls
+ * These values are persisted to the cache and loaded for subsequent runSteps calls
  * with the same executionId.
  */
 export type GlobalPlaceholders = {
@@ -45,7 +45,7 @@ export type GlobalPlaceholders = {
 
 /**
  * Project data placeholders for {{data.key}} syntax.
- * These are stored in Redis and managed via project settings.
+ * These are stored in the cache and managed via project settings.
  */
 export type ProjectDataPlaceholders = Record<string, string>;
 
@@ -108,27 +108,27 @@ const GLOBAL_PLACEHOLDER_PATTERN = /\{\{global\.\w+\}\}/;
 const PROJECT_DATA_PLACEHOLDER_PATTERN = /\{\{data\.(\w+)\}\}/g;
 
 // =============================================================================
-// Redis Operations (Global Values)
+// Cache Operations (Global Values)
 // =============================================================================
 
 /**
- * Generates a Redis key for storing global values for an execution.
+ * Generates a cache key for storing global values for an execution.
  */
-function getRedisKey(executionId: string): string {
+function getCacheKey(executionId: string): string {
   return `execution:${executionId}:globals`;
 }
 
 /**
- * Fetches global values from Redis for a given execution ID.
+ * Fetches global values from the cache for a given execution ID.
  * Returns null if no values exist.
  */
 export async function getGlobalValues(
   executionId: string,
 ): Promise<Partial<GlobalPlaceholders> | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-  const key = getRedisKey(executionId);
-  const values = await redis.hgetall(key);
+  const cache = getCache();
+  if (!cache) return null;
+  const key = getCacheKey(executionId);
+  const values = await cache.hgetall(key);
 
   if (!values || Object.keys(values).length === 0) {
     return null;
@@ -138,47 +138,47 @@ export async function getGlobalValues(
 }
 
 /**
- * Saves global values to Redis for a given execution ID.
+ * Saves global values to the cache for a given execution ID.
  * Sets a 24-hour TTL on the key.
  */
 export async function saveGlobalValues(
   executionId: string,
   values: GlobalPlaceholders,
 ): Promise<void> {
-  const redis = getRedis();
-  if (!redis) return;
+  const cache = getCache();
+  if (!cache) return;
 
-  const key = getRedisKey(executionId);
+  const key = getCacheKey(executionId);
 
   // Save all values as a hash
-  await redis.hset(key, values);
+  await cache.hset(key, values);
 
   // Set TTL
-  await redis.expire(key, GLOBAL_VALUES_TTL_SECONDS);
+  await cache.expire(key, GLOBAL_VALUES_TTL_SECONDS);
 
-  logger.debug(`Saved global values to Redis for execution: ${executionId}`);
+  logger.debug(`Saved global values to cache for execution: ${executionId}`);
 }
 
 // =============================================================================
-// Redis Operations (Project Data)
+// Cache Operations (Project Data)
 // =============================================================================
 
 /**
- * Generates a Redis key for storing project data.
+ * Generates a cache key for storing project data.
  */
-function getProjectDataRedisKey(projectId: string): string {
+function getProjectDataCacheKey(projectId: string): string {
   return `project:${projectId}:data`;
 }
 
 /**
- * Fetches project data from Redis for a given project ID.
+ * Fetches project data from the cache for a given project ID.
  * Returns an empty object if no data exists.
  */
 export async function getProjectData(projectId: string): Promise<ProjectDataPlaceholders> {
-  const redis = getRedis();
-  if (!redis) return {};
-  const key = getProjectDataRedisKey(projectId);
-  const values = await redis.hgetall(key);
+  const cache = getCache();
+  if (!cache) return {};
+  const key = getProjectDataCacheKey(projectId);
+  const values = await cache.hgetall(key);
 
   if (!values || Object.keys(values).length === 0) {
     return {};
@@ -402,7 +402,7 @@ export function replacePlaceholders(
 /**
  * Processes steps and assertions to replace dynamic placeholders with consistent values.
  * Handles {{run.*}} placeholders (fresh per call), {{global.*}} placeholders
- * (shared across execution via Redis), and {{data.*}} placeholders (project data from Redis).
+ * (shared across execution via cache), and {{data.*}} placeholders (project data from cache).
  * Returns the processed steps and assertions along with the generated values.
  */
 export async function processPlaceholders(

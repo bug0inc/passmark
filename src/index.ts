@@ -21,7 +21,7 @@ async function maybeWithSpan<T>(
 }
 import { z } from "zod";
 import { buildRunStepsPrompt, buildRunUserFlowPrompt } from "./prompts";
-import { getRedis } from "./redis";
+import { getCache } from "./cache";
 import { getAItools } from "./tools";
 import { RunStepsOptions, UserFlowOptions } from "./types";
 import {
@@ -60,7 +60,7 @@ import {
 /**
  * Executes a sequence of test steps using AI with intelligent caching.
  * Each step is described in natural language and executed via browser automation.
- * Successfully executed steps are cached in Redis for faster subsequent runs.
+ * Successfully executed steps are cached for faster subsequent runs.
  *
  * @param options - Configuration including page, steps, assertions, and callbacks
  * @param options.page - The Playwright page instance
@@ -115,14 +115,14 @@ export const runSteps = async ({
   // when a new tab opens, or explicitly via the `switchToTab` step field.
   const tabManager = createTabManager(page);
 
-  const redis = getRedis();
-  if (!redis) {
+  const cache = getCache();
+  if (!cache) {
     logger.warn(
-      "Redis not configured. Step caching is disabled — all steps will use AI execution.",
+      "Cache not configured. Step caching is disabled — all steps will use AI execution.",
     );
     if (executionId) {
       logger.warn(
-        "{{global.*}} placeholders will not persist across runSteps calls without Redis.",
+        "{{global.*}} placeholders will not persist across runSteps calls without a cache provider.",
       );
     }
   }
@@ -353,7 +353,7 @@ export const runSteps = async ({
     }
 
     // First check if the step is cached on redis
-    const cachedStep = redis ? await redis.hgetall(`step:${userFlow}:${step.description}`) : {};
+    const cachedStep = cache ? await cache.hgetall(`step:${userFlow}:${step.description}`) : {};
 
     if (
       !bypassCache &&
@@ -532,10 +532,10 @@ export const runSteps = async ({
         .flatMap((s) => s.toolCalls)
         .filter((tool) => ["browser_snapshot", "browser_stop"].indexOf(tool.toolName) === -1);
 
-      if (allToolCalls.length === 1 && redis) {
+      if (allToolCalls.length === 1 && cache) {
         const cacheData = getPendingCacheData();
         if (cacheData) {
-          await redis.hset(`step:${userFlow}:${step.description}`, cacheData);
+          await cache.hset(`step:${userFlow}:${step.description}`, cacheData);
           logger.debug(`Cached step action: ${step.description}`);
         }
       }
@@ -876,4 +876,5 @@ export { extractEmailContent, generateEmail } from "./email";
 export { assert } from "./assertion";
 
 export type { AssertionResult } from "./types";
+export type { CacheStore } from "./cache";
 export { PassmarkError, StepExecutionError, ValidationError, AIModelError, CacheError, ConfigurationError } from "./errors";

@@ -146,7 +146,7 @@ export type RunStepsOptions = {
 
   /**
    * Execution ID to link multiple runSteps calls together.
-   * When provided, {{global.*}} placeholders are persisted to Redis
+   * When provided, {{global.*}} placeholders are persisted to the cache
    * and shared across all runSteps calls with the same executionId.
    * Required when using {{global.*}} placeholders.
    */
