@@ -45,17 +45,17 @@ describe("config", () => {
   });
 
   it("getModelId returns default for each of the keys", () => {
-  const keys = Object.keys(DEFAULT_MODELS) as Array<keyof typeof DEFAULT_MODELS>;
-  expect(keys).toHaveLength(9);
+    const keys = Object.keys(DEFAULT_MODELS) as Array<keyof typeof DEFAULT_MODELS>;
+    expect(keys).toHaveLength(9);
 
-  for (const key of keys) {
-    // assertionModels is a special case—it's not a simple string ID like the others
-    if (key === "assertionModels") {
-      expect(DEFAULT_MODELS[key]).toBeUndefined();
-      continue;
+    for (const key of keys) {
+      // assertionModels is a special case—it's not a simple string ID like the others
+      if (key === "assertionModels") {
+        expect(DEFAULT_MODELS[key]).toBeUndefined();
+        continue;
+      }
+      expect(getModelId(key)).toBe(DEFAULT_MODELS[key]);
     }
-    expect(getModelId(key)).toBe(DEFAULT_MODELS[key]);
-  }
   });
 
   it("getModelId returns custom value after configure", () => {

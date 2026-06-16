@@ -1,4 +1,3 @@
-import { logger } from "./logger";
 import { ConfigurationError } from "./errors";
 import { initTelemetry } from "./instrumentation";
 
@@ -163,7 +162,7 @@ export function configure(config: Config) {
     const assertionModels = getAssertionModelsList(models);
     if (assertionModels.length < 2) {
       throw new ConfigurationError(
-        `Passmark: assertion consensus requires at least 2 models, got ${assertionModels.length}.`
+        `[passmark] assertion consensus requires at least 2 models, got ${assertionModels.length}.`
       );
     }
   }
@@ -231,7 +230,7 @@ export function getMode(): AIMode {
 export type ResolvedAI = {
   mode: AIMode;
   gateway: AIGateway;
-  getModelId: (key: keyof ModelConfig) => string;
+  getModelId: (key: keyof Omit<ModelConfig, 'assertionModels'>) => string;
 };
 
 const CUA_LOCK_MESSAGE =
@@ -265,7 +264,7 @@ export function resolveAI(...overrides: (AIOverride | undefined)[]): ResolvedAI 
   };
   const mode = (lastDefined("mode") as AIMode | undefined) ?? "snapshot";
   const gateway = (lastDefined("gateway") as AIGateway | undefined) ?? "none";
-  const getModelIdForKey = (key: keyof ModelConfig): string => {
+  const getModelIdForKey = (key: keyof Omit<ModelConfig, 'assertionModels'>): string => {
     for (let i = layers.length - 1; i >= 0; i--) {
       const v = layers[i]?.models?.[key];
       if (v !== undefined) return v;

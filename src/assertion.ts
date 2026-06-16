@@ -32,8 +32,9 @@ function createModelAssertionFunction(
 ): ModelAssertionFunction {
   return async (): Promise<AssertionResult> => {
     // Check if it's a Google model (for provider-specific options)
-    const isGoogleModel = modelId.toLowerCase().includes('google') || modelId.toLowerCase().includes('gemini');
-    const isAnthropicModel = modelId.toLowerCase().includes('anthropic') || modelId.toLowerCase().includes('claude');
+    const lowerModelId = modelId.toLowerCase();
+    const isGoogleModel = lowerModelId.includes("google") || lowerModelId.includes("gemini");
+    const isAnthropicModel = lowerModelId.includes("anthropic") || lowerModelId.includes("claude");
     
     const providerOptions: Record<string, any> = {};
     
@@ -73,7 +74,7 @@ function createModelAssertionFunction(
  */
 function createArbiterFunction(
   modelResults: Array<{ modelId: string; result: AssertionResult }>,
-  messages: ModelMessage[],
+  _messages: ModelMessage[],
   imageContent: Array<{ type: "image"; image: string }>,
   assertion: string,
   snapshot: string,
@@ -140,7 +141,8 @@ Please carefully review the evidence (screenshot and accessibility snapshot when
     ];
 
     const arbiterModelId = getModelId("assertionArbiter");
-    const isGoogleModel = arbiterModelId.toLowerCase().includes('google') || arbiterModelId.toLowerCase().includes('gemini');
+    const lowerArbiterModelId = arbiterModelId.toLowerCase();
+    const isGoogleModel = lowerArbiterModelId.includes("google") || lowerArbiterModelId.includes("gemini");
     
     const providerOptions: Record<string, any> = {
       openrouter: {
