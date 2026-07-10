@@ -34,6 +34,28 @@ function getGoogleProvider() {
   return _google;
 }
 
+/**
+ * Normalize a bare-host `ANTHROPIC_BASE_URL`.
+ *
+ * AI coding harnesses (Claude Code, Cursor) export `ANTHROPIC_BASE_URL` without
+ * the `/v1` suffix for their own runtime. `@ai-sdk/anthropic` prefers this env
+ * var over its `https://api.anthropic.com/v1` default and uses it verbatim, so
+ * a bare host drops `/v1` and every request 404s at `.../messages` — while
+ * other providers (e.g. Gemini) keep working, making consensus runs look
+ * half-broken. Append `/v1` when the configured base lacks a version path.
+ *
+ * Returns `undefined` when the env var is unset so the provider falls back to
+ * its own default. Remove once the SDK normalizes upstream.
+ *
+ * @see https://github.com/bug0inc/passmark/issues/57
+ * @see https://github.com/vercel/ai/issues/15542
+ */
+export function normalizedAnthropicBaseURL(): string | undefined {
+  const base = process.env.ANTHROPIC_BASE_URL;
+  if (!base) return undefined;
+  return /\/v1\/?$/.test(base) ? base : `${base.replace(/\/$/, "")}/v1`;
+}
+
 function getAnthropicProvider() {
   if (!_anthropic) {
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -43,6 +65,7 @@ function getAnthropicProvider() {
     }
     _anthropic = createAnthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
+      baseURL: normalizedAnthropicBaseURL(),
     });
   }
   return _anthropic;
