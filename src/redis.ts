@@ -5,7 +5,7 @@ import { logger } from "./logger";
 let client: Redis | null = null;
 let initialized = false;
 
-export function initRedisHandlers(client: Redis): void {
+function initRedisHandlers(client: Redis): void {
   // Handle connection errors gracefully without crashing
   client.on("error", (err) => {
     logger.warn(`Redis connection error: ${err.message}`);
