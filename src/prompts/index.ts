@@ -55,7 +55,7 @@ Use the following data for the current step:
         If presented with login screen, log in to the website using the following credentials:
         <Auth>
         - Email: ${auth.email}
-        - Password: ${auth.password}
+        - Password: ${auth.password}${auth.callbackUrl ? `\n        - Go to this callbackUrl post login: ${auth.callbackUrl}` : ""}
         </Auth>`
       : ""
     }

@@ -2,6 +2,12 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getModelId } from "./config";
 import { resolveModel } from "./models";
+import { ValidationError } from "./errors";
+import { GlobalPlaceholders, LocalPlaceholders, saveGlobalValues } from "./data-cache";
+import { logger } from "./logger";
+import { ExtractionConfig } from "./types";
+import { safeSnapshot } from "./utils";
+import { createTabManager } from "./utils/tab-manager";
 
 const extractionSchema = z.object({
   extractedValue: z.string().describe("The extracted value based on the prompt"),
@@ -67,4 +73,56 @@ Return the extracted value.`,
   });
 
   return output.extractedValue;
+}
+
+/**
+ * Runs an `extract` step: pulls a value off the current page with AI and stores
+ * it under the requested scope so later steps can reference it via placeholder.
+ *
+ * - scope "local" (default) → stored as {{run.<as>}} in `localValues`, available
+ *   only within the current runSteps call.
+ * - scope "global" → stored as {{global.<as>}} in `globalValues` and persisted to
+ *   Redis under `executionId`, so subsequent runSteps calls with the same
+ *   executionId can read it. Requires `executionId`.
+ */
+export async function applyExtraction({
+  extract,
+  tabManager,
+  localValues,
+  globalValues,
+  executionId,
+}: {
+  extract: ExtractionConfig;
+  tabManager: ReturnType<typeof createTabManager>;
+  localValues: LocalPlaceholders;
+  globalValues?: GlobalPlaceholders;
+  executionId?: string;
+}): Promise<void> {
+  const snapshot = await safeSnapshot(tabManager);
+  const url = tabManager.active().url();
+  const extracted = await extractDataWithAI({
+    snapshot,
+    url,
+    prompt: extract.prompt,
+  });
+
+  const scope = extract.scope ?? "local";
+
+  if (scope === "global") {
+    if (!executionId || !globalValues) {
+      // Should be caught earlier in processPlaceholders, but guard defensively.
+      throw new ValidationError(
+        `extract with scope "global" requires an executionId. Cannot extract "${extract.as}" into the global scope.`,
+      );
+    }
+    const placeholderKey = `{{global.${extract.as}}}`;
+    globalValues[placeholderKey] = extracted;
+    // Persist so subsequent runSteps calls with the same executionId can read it.
+    await saveGlobalValues(executionId, globalValues);
+    logger.info(`Extracted {{global.${extract.as}}}: "${extracted}"`);
+  } else {
+    const placeholderKey = `{{run.${extract.as}}}`;
+    localValues[placeholderKey] = extracted;
+    logger.info(`Extracted {{run.${extract.as}}}: "${extracted}"`);
+  }
 }

@@ -11,7 +11,7 @@ export type EmailProvider = {
   extractContent: (params: { email: string; prompt: string }) => Promise<string>;
 };
 
-export type AIGateway = "vercel" | "openrouter" | "cloudflare" | "none";
+export type AIGateway = "vercel" | "openrouter" | "opencodezen" | "cloudflare" | "none";
 
 /**
  * Execution mode for browser automation.
@@ -76,6 +76,27 @@ export type RedisConfig = {
   url?: string;
 };
 
+/**
+ * Policy for resolving disagreements between the primary and secondary
+ * assertion models.
+ * - "consult-arbiter-on-disagreement" (default): a third arbiter model
+ *   makes the final call. Best when you trust the arbiter to break ties.
+ * - "fail-on-disagreement": any disagreement fails the assertion
+ *   immediately. Strictest possible setting — useful when you'd rather
+ *   surface flakiness/ambiguity than risk a single model being wrong.
+ */
+export type ConsensusPolicy =
+  | "consult-arbiter-on-disagreement"
+  | "fail-on-disagreement";
+
+export type AssertionsConfig = {
+  /**
+   * How to resolve disagreements between the primary and secondary
+   * assertion models. Defaults to "consult-arbiter-on-disagreement".
+   */
+  consensusPolicy?: ConsensusPolicy;
+};
+
 export type TelemetryConfig = {
   /**
    * Axiom API token for OpenTelemetry tracing of AI calls.
@@ -98,27 +119,14 @@ type Config = {
   redis?: RedisConfig;
   /** Telemetry (Axiom) connection. When omitted, falls back to `AXIOM_TOKEN`/`AXIOM_DATASET` env vars. */
   telemetry?: TelemetryConfig;
+  /** Behavior of the multi-model assertion consensus engine. */
+  assertions?: AssertionsConfig;
   /**
    * Directory used to temporarily store video recordings for video-flagged
    * assertions. Defaults to `/tmp/passmark-recordings`. Files are deleted
    * after the assertions consume them.
    */
   videoDir?: string;
-  /**
-   * When true (default), post-action snapshots within a single step only
-   * include DOM nodes that changed since the last snapshot, dramatically
-   * reducing token usage on complex pages (large tables, dashboards, grids).
-   *
-   * The first snapshot of each step is always full so the agent has complete
-   * orientation. Subsequent snapshots are diffed. A built-in savings
-   * threshold falls back to a full snapshot if the diff would not save
-   * enough — delta mode is never worse than full mode.
-   *
-   * Set to `false` to disable globally and always return full snapshots.
-   *
-   * @default true
-   */
-  deltaSnapshot?: boolean;
 };
 
 let globalConfig: Config = {};
@@ -177,11 +185,11 @@ export function getMode(): AIMode {
 }
 
 /**
- * Returns whether delta snapshots are enabled. Defaults to `true` — every
- * snapshot after the first within a step returns only the diff.
+ * Returns the effective consensus policy. Defaults to
+ * "consult-arbiter-on-disagreement" so existing users see no change.
  */
-export function getDeltaSnapshotEnabled(): boolean {
-  return getConfig().deltaSnapshot ?? true;
+export function getConsensusPolicy(): ConsensusPolicy {
+  return getConfig().assertions?.consensusPolicy ?? "consult-arbiter-on-disagreement";
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { configure, getConfig, getModelId, getDeltaSnapshotEnabled, resetConfig, DEFAULT_MODELS } from "../config";
+import { configure, getConfig, getModelId, resetConfig, DEFAULT_MODELS } from "../config";
 
 describe("config", () => {
   beforeEach(() => {
@@ -27,6 +27,11 @@ describe("config", () => {
   it("configure sets ai.gateway to openrouter", () => {
     configure({ ai: { gateway: "openrouter" } });
     expect(getConfig().ai?.gateway).toBe("openrouter");
+  });
+
+  it("configure sets ai.gateway to opencodezen", () => {
+    configure({ ai: { gateway: "opencodezen" } });
+    expect(getConfig().ai?.gateway).toBe("opencodezen");
   });
 
   it("configure merges without overwriting other keys", () => {
@@ -71,27 +76,6 @@ describe("config", () => {
   it("configure with uploadBasePath", () => {
     configure({ uploadBasePath: "/tmp/test-uploads" });
     expect(getConfig().uploadBasePath).toBe("/tmp/test-uploads");
-  });
-
-  it("getDeltaSnapshotEnabled returns true by default", () => {
-    expect(getDeltaSnapshotEnabled()).toBe(true);
-  });
-
-  it("getDeltaSnapshotEnabled returns false when configured off", () => {
-    configure({ deltaSnapshot: false });
-    expect(getDeltaSnapshotEnabled()).toBe(false);
-  });
-
-  it("getDeltaSnapshotEnabled returns true when explicitly configured on", () => {
-    configure({ deltaSnapshot: true });
-    expect(getDeltaSnapshotEnabled()).toBe(true);
-  });
-
-  it("configure merges deltaSnapshot without overwriting other keys", () => {
-    configure({ uploadBasePath: "./uploads" });
-    configure({ deltaSnapshot: false });
-    expect(getConfig().uploadBasePath).toBe("./uploads");
-    expect(getConfig().deltaSnapshot).toBe(false);
   });
 
   it("resetConfig clears everything", () => {

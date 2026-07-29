@@ -53,7 +53,7 @@ ${auth
       ? `<Auth>
 If a login screen appears, use:
 - Email: ${auth.email}
-- Password: ${auth.password}
+- Password: ${auth.password}${auth.callbackUrl ? `\n- Go to this callbackUrl post login: ${auth.callbackUrl}` : ""}
 </Auth>`
       : ""
     }

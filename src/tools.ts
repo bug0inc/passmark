@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Locator, type Page } from "@playwright/test";
 import { wrapTool } from "axiom/ai";
 import shortid from "shortid";
-import { getConfig, getDeltaSnapshotEnabled } from "./config";
+import { getConfig } from "./config";
 import { isAxiomEnabled } from "./instrumentation";
 import { logger } from "./logger";
 import { LOCATOR_ACTION_TIMEOUT, SNAPSHOT_TIMEOUT, STOP_DELAY } from "./constants";
@@ -16,6 +16,12 @@ import {
   TestType,
 } from "@playwright/test";
 import type { TabManager } from "./utils/tab-manager";
+
+export function resolveUploadPath(filePath: string, uploadBasePath: string): string {
+  return filePath.startsWith("/") || filePath.match(/^[A-Za-z]:/)
+    ? filePath
+    : `${uploadBasePath}/${filePath}`;
+}
 
 type ToolSettings = {
   abortController?: AbortController;
@@ -53,7 +59,7 @@ export function getAItools(page: Page, settings?: ToolSettings) {
       const snapshot = await playwrightTools.getSnapshot();
       return { ...result, snapshot };
     } catch (_error) {
-      return `Error executing this action. Retry the action or try a different one.\n\nLatest Snapshot:\n\n${await playwrightTools.getSnapshot()}`;
+      return `Error executing this action. Retry the action or try a different one.\n\nLatest Snapshot:\n\n${await playwrightTools.getSnapshot({ forceFull: true })}`;
     }
   };
 
@@ -146,7 +152,7 @@ export function getAItools(page: Page, settings?: ToolSettings) {
           reasoning: z.string().describe("A quick one-line reasoning behind this action"),
         }),
         execute: async (_args) => {
-          return await playwrightTools.getSnapshot();
+          return await playwrightTools.getSnapshot({ forceFull: true });
         },
       }),
     ),
@@ -253,6 +259,7 @@ export function getAItools(page: Page, settings?: ToolSettings) {
     clearPendingCacheData: () => {
       playwrightTools.pendingCacheData = null;
     },
+    resetLastSnapshot: () => playwrightTools.resetLastSnapshot(),
   };
 }
 
@@ -261,7 +268,6 @@ class PlaywrightTools {
   private tabManager?: TabManager;
   private currentStep;
   private abortController?: AbortController;
-  private deltaSnapshotEnabled: boolean;
   private lastSnapshot: string | null = null;
   public pendingCacheData: Record<string, string> | null = null;
 
@@ -276,14 +282,13 @@ class PlaywrightTools {
     this.tabManager = tabManager;
     this.currentStep = currentStep;
     this.abortController = abortController;
-    this.deltaSnapshotEnabled = getDeltaSnapshotEnabled();
   }
 
-  public async getSnapshot() {
+  public async getSnapshot({ forceFull = false }: { forceFull?: boolean } = {}) {
     const raw = await this.page.ariaSnapshot({ mode: "ai", timeout: SNAPSHOT_TIMEOUT });
     const full = `url: ${this.page.url()}\n\n${raw}`;
 
-    if (!this.deltaSnapshotEnabled || this.lastSnapshot === null) {
+    if (this.lastSnapshot === null || forceFull) {
       this.lastSnapshot = full;
       return full;
     }
@@ -300,6 +305,10 @@ class PlaywrightTools {
       `Delta snapshot: -${savedChars.toLocaleString()} chars saved on step "${this.currentStep?.description}"`,
     );
     return diff;
+  }
+
+  public resetLastSnapshot() {
+    this.lastSnapshot = null;
   }
 
   public navigateSchema = z.object({
@@ -585,7 +594,11 @@ class PlaywrightTools {
   public uploadFileSchema = z.object({
     ref: z.string().describe('The ref of the "button" that triggers a FileChooser to upload files'),
     elementDescription: z.string().describe("A description of the element, used for debugging"),
-    filePaths: z.array(z.string()).describe("Array of absolute file paths to upload"),
+    filePaths: z
+      .array(z.string())
+      .describe(
+        "Array of file paths to upload. Can be absolute paths (e.g., '/tmp/file.png') or relative paths (e.g., 'document.pdf' which will be resolved against uploadBasePath)",
+      ),
     reasoning: z.string().describe("A quick one-line reasoning behind this action"),
     doesActionAdvanceUsTowardsGoal: z
       .boolean()
@@ -596,13 +609,13 @@ class PlaywrightTools {
   public async uploadFile({
     ref,
     elementDescription,
-    filePaths, // This is not a full path. It accepts a string filename which should be available in `uploads` directory
+    filePaths,
   }: z.infer<typeof this.uploadFileSchema>) {
     const locator = this.page.locator(`aria-ref=${ref}`).describe(elementDescription);
 
     // We expect to find these files in the `./uploads` directory if no base path is configured
     const uploadBasePath = getConfig().uploadBasePath || "./uploads";
-    const prefixedFilePaths = filePaths.map((filePath) => `${uploadBasePath}/${filePath}`);
+    const prefixedFilePaths = filePaths.map((filePath) => resolveUploadPath(filePath, uploadBasePath));
 
     // File uploads are not cached for now as it needs a two step process
     // We can solve this later by introducing multi-action caching if needed
