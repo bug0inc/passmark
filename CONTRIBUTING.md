@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Passmark! This document provides 
 
 1. **Fork** the repository
 2. **Clone** your fork locally
-3. **Install dependencies**: `npm install`
+3. **Install dependencies**: `pnpm install` (this repo is pinned to `pnpm@10.33.0` via `packageManager`)
 4. **Create a branch** for your change: `git checkout -b feature/your-feature`
 
 ## Development Setup
@@ -14,17 +14,23 @@ Thank you for your interest in contributing to Passmark! This document provides 
 ### Prerequisites
 
 - Node.js >= 18.0.0
-- Redis instance (local or remote)
-- API keys for Anthropic and Google Generative AI (for running tests)
-- Playwright: `npx playwright install`
+- pnpm 10 (`corepack enable` will use the version in `package.json`)
+- Redis instance (local or remote) — only needed for live cache / `{{global.*}}` flows
+- API keys for Anthropic and Google Generative AI — only needed for live AI runs, not for `pnpm test`
+- Playwright: `npx playwright install` — only needed for running tests against a real browser
 
-### Building
+### Checks (same as CI)
 
 ```bash
-npm run build
+pnpm run format:check
+pnpm run lint
+pnpm run build
+pnpm test
 ```
 
-This runs the TypeScript compiler (`tsc`). Fix any type errors before submitting.
+`pnpm run build` runs the TypeScript compiler (`tsc`). Fix any type errors before submitting.
+
+CI runs these on every pull request to `main` (tests on Node 18, 20, 22, and 24). The unit suite is mocked and does not need API keys, Redis, or a browser.
 
 ## Code Style
 
@@ -42,10 +48,11 @@ This runs the TypeScript compiler (`tsc`). Fix any type errors before submitting
 - `feature/description` for new features
 - `fix/description` for bug fixes
 - `docs/description` for documentation changes
+- `ci/description` for CI/CD changes
 
 ### Commit Messages
 
-Use clear, concise commit messages:
+Use conventional commit messages. PR titles are checked the same way:
 
 ```
 feat: add support for custom model providers
@@ -53,13 +60,17 @@ fix: handle empty email extraction gracefully
 docs: update environment variables table
 ```
 
+Allowed prefixes: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
 ### Pull Requests
 
-1. Ensure `npm run build` passes with no errors
+1. Ensure CI would pass locally (`pnpm run format:check`, `pnpm run lint`, `pnpm run build`, `pnpm test`)
 2. Update documentation if your change affects the public API
 3. Add entries to `CHANGELOG.md` under an `[Unreleased]` section
 4. Keep PRs focused on a single change
 5. Provide a clear description of what changed and why
+
+Publishing to npm is automated: creating a GitHub Release on `main` runs `.github/workflows/release.yml`. That workflow needs an `NPM_TOKEN` repository secret with publish access to the `passmark` package.
 
 ## Project Structure
 

@@ -8,6 +8,7 @@
     <a href="https://x.com/bug0inc"><img src="https://img.shields.io/badge/follow-%40bug0inc-black?logo=x" alt="Follow on X"></a>
     <a href="https://www.linkedin.com/company/bug0"><img src="https://img.shields.io/badge/LinkedIn-bug0-blue?logo=linkedin" alt="LinkedIn"></a>
     <a href="https://bug0.com"><img src="https://img.shields.io/badge/website-bug0.com-brightgreen" alt="Website"></a>
+    <a href="https://github.com/bug0inc/passmark/actions/workflows/ci.yml"><img src="https://github.com/bug0inc/passmark/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://www.npmjs.com/package/passmark"><img src="https://img.shields.io/npm/v/passmark" alt="npm package version"></a>
     <a href="https://github.com/bug0inc/passmark/blob/main/LICENSE.md"><img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue" alt="License"></a>
 </p>

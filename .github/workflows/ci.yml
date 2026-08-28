@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Unit and mocked integration tests live under src/__tests__ and do not call
+# provider APIs. A live Playwright job would need secrets that fork PRs never
+# receive; add one when a real E2E suite exists, gated on push to main.
+
+jobs:
+  quality:
+    name: Lint, format, and typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: "22"
+      - name: Prettier
+        run: pnpm run format:check
+      - name: ESLint
+        run: pnpm run lint
+      - name: Typecheck
+        run: pnpm run build
+
+  test:
+    name: Test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Test
+        run: pnpm test
+      - name: Coverage
+        if: matrix.node-version == 22
+        run: pnpm run test:coverage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.node-version == 22
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: error
+
+  ci:
+    name: CI
+    needs: [quality, test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Required jobs passed
+        run: |
+          test "${{ needs.quality.result }}" = "success"
+          test "${{ needs.test.result }}" = "success"

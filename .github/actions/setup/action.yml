@@ -1,0 +1,30 @@
+name: Setup
+description: Install pnpm, Node.js, and dependencies from the lockfile.
+
+inputs:
+  node-version:
+    description: Node.js version to install
+    required: true
+  registry-url:
+    description: Optional npm registry URL (needed for publish)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      if: ${{ inputs.registry-url == '' }}
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      if: ${{ inputs.registry-url != '' }}
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+        registry-url: ${{ inputs.registry-url }}
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
